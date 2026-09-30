@@ -28,7 +28,7 @@
 
 下载的 ZIP 先解压。测试安装包未购买代码签名证书；如果系统拦截，请从系统设置允许打开你自己构建/本仓库下载的应用。
 
-本次先交付 Mac 安装包与源码。Windows 构建被 GitHub 账户账单锁定阻止，尚无 Windows 安装包，详见[验证记录](docs/VERIFICATION.md)。
+Windows 安装包也可以在本机生成，构建及实机安装结果见[验证记录](docs/VERIFICATION.md)。GitHub Actions 曾被账户账单锁定阻止；若云端运行失败，可按下面的命令在 Windows 本机构建。
 
 ## 开发
 
@@ -59,8 +59,10 @@ npm run tauri -- build --target aarch64-apple-darwin --bundles dmg
 Windows 构建（在 Windows 上执行）：
 
 ```powershell
-npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis
+npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
+
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.1.0_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
 
 ## 第一版边界
 

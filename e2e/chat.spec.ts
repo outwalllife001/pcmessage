@@ -168,7 +168,7 @@ async function desktop(page: Page) {
 }
 test("Markdown chat, original copy, preview, image attachment and send shortcut", async ({
   page,
-}) => {
+}, testInfo) => {
   await desktop(page);
   await expect(page.locator(".markdown h1")).toHaveText("明天的安排");
   await page.getByRole("button", { name: "复制原文" }).first().click();
@@ -187,7 +187,7 @@ test("Markdown chat, original copy, preview, image attachment and send shortcut"
   await expect(page.locator(".outgoing .markdown h2")).toHaveText("来自 Mac");
   await expect(page.getByRole("textbox", { name: "消息内容" })).toHaveValue("");
   await expect(page.locator(".message-images img")).toHaveCount(1);
-  await page.screenshot({ path: "/tmp/pcmessage-ui.png" });
+  await page.screenshot({ path: testInfo.outputPath("pcmessage-ui.png") });
 });
 test("per-device drafts, offline state and failed-message retry", async ({
   page,

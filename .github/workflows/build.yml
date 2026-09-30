@@ -43,7 +43,7 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - run: npx playwright install chromium
       - run: npm run test:ui
-      - run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
       - uses: actions/upload-artifact@v4
         with:
           name: PCMessage-${{ matrix.target }}
