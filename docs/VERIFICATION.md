@@ -59,3 +59,15 @@
 - 无新增依赖、服务器或消息数据库迁移。沿用 v1 附件存储字段，已有配对与历史保留。
 - 本轮文件传输的双节点集成测试在 Mac 本机执行；Windows 源码已同步，任意文件实机互传需要 Windows 同样更新到 0.2.0。
 - Mac ARM64 0.2.0 的 `.app` / `.dmg` 本地构建成功；本机应用已更新。原生文件选择器实际选取 Markdown 文件，显示正确文件名和 75 B 大小；验证附件随后从草稿移除，原聊天记录保留。
+
+## 0.2.1 Mac 签名与单向发送修复
+
+- 故障复现：Windows → Mac 可接收，Mac → `192.168.5.48:47321` 失败；保存的错误指向 Mac 本地网络权限。终端使用当前配对证书访问 Windows HTTPS 返回 200，应用内仍显示离线。
+- 原安装包仅有链接器的临时签名，签名 identifier 随构建改变，未绑定 Info.plist，也没有稳定的 designated requirement。[Apple TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy) 建议使用 Apple 颁发的签名身份，使本地网络权限可靠跟踪 macOS 程序。
+- 控制变量验证：同一份 0.2.0 程序用本机已有 Apple Development 证书签名，固定 identifier 为 `com.pcmessage.desktop`，替换后重启。没有开关网络权限或改 Windows 防火墙，应用显示 Windows 在线，新文字消息显示“已发送”；重试先前失败的 `nihao` 同样成功。
+- 已通过现有 SSH 密钥连接 Windows，核对接收进程为安装目录下的 `pcmessage.exe`，版本 0.2.0，TCP 接收服务监听 `0.0.0.0:47321`。根据进程打开的 SQLite 文件定位实际数据目录，再只读核对消息 ID：签名修复后的两条 Mac 消息均在 Windows 保存为 incoming / sent。当前修复不要求更新 Windows。
+- 两项同名 Windows 配对对应不同设备证书；旧身份的 HTTPS 校验失败，当前身份校验通过。保留历史与旧配对，实机测试使用当前在线的身份。
+- `npm run build:mac` 新增固定证书选择、签名校验及普通拖放安装 DMG 打包；无有效证书或指定临时签名 `-` 时停止，避免再次交付临时签名包。证书和私钥没有写入仓库。
+- 0.2.1 ARM64 构建成功，`.app` 的 designated requirement 与已验证的签名 0.2.0 完全一致，`codesign --verify --strict` 及 DMG 校验通过。开发证书供本机使用，尚未进行 Developer ID 发行签名或公证。
+- 前端构建、4 项 Markdown 测试及 6 项真实 HTTPS / SQLite 集成测试通过；无效签名身份的构建拒绝验证通过。
+- DMG 挂载后再次通过 `codesign --verify --strict`。0.2.1 已打包；实机的签名修复应用在 0.2.0 上并已验证发送，随后 Mac 锁屏，0.2.1 的正式替换及再次重启验证尚待解锁。

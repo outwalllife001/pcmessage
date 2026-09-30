@@ -1,11 +1,12 @@
 {
   "name": "pcmessage",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "build:mac": "node scripts/build-mac.mjs",
     "test": "vitest run",
     "test:ui": "playwright test",
     "tauri": "tauri",

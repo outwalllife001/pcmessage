@@ -28,7 +28,7 @@
 - `PCMessage-aarch64-apple-darwin`：Mac `.dmg`
 - `PCMessage-x86_64-pc-windows-msvc`：Windows `-setup.exe`
 
-下载的 ZIP 先解压。测试安装包未购买代码签名证书；如果系统拦截，请从系统设置允许打开你自己构建/本仓库下载的应用。
+下载的 ZIP 先解压。云端测试安装包未配置发行证书。Mac 日常使用请采用下述签名构建，避免更新后本地网络权限失效。
 
 Windows 安装包也可以在本机生成，构建及实机安装结果见[验证记录](docs/VERIFICATION.md)。GitHub Actions 曾被账户账单锁定阻止；若云端运行失败，可按下面的命令在 Windows 本机构建。
 
@@ -55,8 +55,12 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 Mac 构建：
 
 ```sh
-npm run tauri -- build --target aarch64-apple-darwin --bundles dmg
+npm run build:mac
 ```
+
+钥匙串中需有一个有效的 Apple Development 或 Developer ID Application 签名证书。脚本自动使用该证书；有多个证书时，以 `APPLE_SIGNING_IDENTITY` 指定固定证书名称。应用和 DMG 均会校验后交付，无有效证书则停止，不回退到临时签名。输出在 `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`。
+
+后续更新持续使用同一签名身份。开发证书适合本机使用，不代表已完成 Developer ID 发行签名或公证。
 
 Windows 构建（在 Windows 上执行）：
 
@@ -64,7 +68,7 @@ Windows 构建（在 Windows 上执行）：
 npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
 
-安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.2.0_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.2.1_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
 
 ## 功能范围
 
@@ -93,5 +97,6 @@ Windows 将家庭网络设为“专用”，允许 PCMessage 通过防火墙；M
 
 在 Mac 的 **系统设置 → 隐私与安全 → 本地网络** 中，检查 PCMessage。
 如果开关已开启但仍无法发送，关闭后重新开启，再完全退出并重启 PCMessage。
-本次实际排查中，Windows 的端口和配对凭证正常，重新开关 Mac 的本地网络权限后恢复双向通信。
+如果更新应用后反复出现，应检查安装包签名：临时签名随每次构建改变，可能导致授权无法稳定识别应用。[Apple 建议使用 Apple 颁发的签名身份](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)。0.2.1 的本机 Mac 构建采用固定证书签名，实测无需开关网络权限即可恢复发送。
+同名电脑若出现两项，选择显示在线的一项；对方更换设备证书后，旧配对仍保留历史，但无法连接新的身份。
 0.1.1 会保存并显示发送失败的具体原因；已配对的电脑显示离线时，也可以尝试发送。
