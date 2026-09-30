@@ -1,0 +1,50 @@
+[package]
+name = "pcmessage"
+version = "0.1.0"
+edition = "2021"
+default-run = "pcmessage"
+
+[lib]
+name = "pcmessage_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["multipart"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+rcgen = "0.13"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+hex = "0.4"
+pem = "3"
+subtle = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+base64 = "0.22"
+socket2 = { version = "0.5", features = ["all"] }
+network-interface = "2"
+hostname = "0.4"
+parking_lot = "0.12"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+arboard = { version = "3", features = ["image-data"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
