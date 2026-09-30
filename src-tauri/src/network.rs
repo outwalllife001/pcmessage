@@ -267,6 +267,8 @@ pub async fn add_address(c: &Arc<Core>, value: &str) -> Result<String, String> {
         return Err("设备身份发生变化，请重试".into());
     }
     let id = device.id.clone();
+    // Only an explicit successful IP lookup restores a removed device.
+    c.store.lock().restore(&id)?;
     c.see(device, address)?;
     Ok(id)
 }
@@ -301,6 +303,13 @@ async fn pair_request(
     }
     c.see(request.device.clone(), address).map_err(bad)?;
     let mut pending = c.pending.lock();
+    if c.store
+        .lock()
+        .is_hidden(&request.device.id)
+        .map_err(internal)?
+    {
+        return Err((StatusCode::FORBIDDEN, "设备已移除".into()));
+    }
     pending.retain(|_, p| p.at.elapsed() < Duration::from_secs(120));
     if let Some(existing) = pending.get(&request.id) {
         if existing.secret == request.secret && existing.device.id == request.device.id {
@@ -383,6 +392,9 @@ pub async fn begin_pair(c: Arc<Core>, peer_id: &str) -> Result<String, String> {
     let request_id = request.id.clone();
     {
         let mut pending = c.pending.lock();
+        if c.store.lock().is_hidden(&device.id)? {
+            return Err("设备已移除，请重新添加".into());
+        }
         pending.retain(|_, p| p.at.elapsed() < Duration::from_secs(120));
         if pending.values().any(|p| p.device.id == device.id) {
             return Err("这台电脑已有配对请求".into());

@@ -38,6 +38,9 @@ impl Store {
         Ok(())
     }
     pub fn trust(&self, peer: &TrustedPeer) -> Result<(), String> {
+        if self.is_hidden(&peer.device.id)? {
+            return Err("设备已移除，请重新添加".into());
+        }
         self.db
             .execute(
                 "INSERT OR REPLACE INTO peers VALUES (?1,?2,?3,?4)",
@@ -75,9 +78,26 @@ impl Store {
         })
         .collect()
     }
-    pub fn forget(&self, id: &str) -> Result<(), String> {
+    pub fn forget(&mut self, id: &str) -> Result<(), String> {
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM peers WHERE id=?1", [id])
+            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR REPLACE INTO settings VALUES (?1,'1')",
+            [format!("hidden:{id}")],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+    pub fn is_hidden(&self, id: &str) -> Result<bool, String> {
+        Ok(self.setting(&format!("hidden:{id}"))?.is_some())
+    }
+    pub fn restore(&self, id: &str) -> Result<(), String> {
         self.db
-            .execute("DELETE FROM peers WHERE id=?1", [id])
+            .execute(
+                "DELETE FROM settings WHERE key=?1",
+                [format!("hidden:{id}")],
+            )
             .map_err(|e| e.to_string())?;
         Ok(())
     }

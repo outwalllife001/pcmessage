@@ -59,9 +59,7 @@ fn confirm_pair(core: State<'_, Arc<Core>>, id: String, accept: bool) -> Result<
 }
 #[tauri::command]
 fn forget_peer(core: State<'_, Arc<Core>>, peer_id: String) -> Result<(), String> {
-    core.store.lock().forget(&peer_id)?;
-    core.changed();
-    Ok(())
+    core.forget(&peer_id)
 }
 #[tauri::command]
 async fn send_message(

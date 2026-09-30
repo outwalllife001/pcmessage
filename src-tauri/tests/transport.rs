@@ -8,6 +8,93 @@ use std::{sync::Arc, time::Duration};
 fn events() -> Events {
     Arc::new(|_, _| {})
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removed_devices_stay_hidden_revoke_access_and_keep_history_for_repairing() {
+    let ar = tempfile::tempdir().unwrap();
+    let br = tempfile::tempdir().unwrap();
+    let a = Core::create(ar.path().into(), 0, events()).unwrap();
+    let b = Core::create(br.path().into(), 0, events()).unwrap();
+    let a_server = Running::start(a.clone(), false).await.unwrap();
+    let _b_server = Running::start(b.clone(), false).await.unwrap();
+    ready(&a).await;
+    ready(&b).await;
+    pair(&a, &b).await;
+    let aid = a.local.lock().id.clone();
+    let bid = b.local.lock().id.clone();
+    let saved_peer = a.trusted(&bid).unwrap();
+    let attachment = b.stage(b"keep this file", "history.txt").unwrap();
+    let sent = network::send(
+        b.clone(),
+        aid.clone(),
+        "保留历史".into(),
+        vec![attachment.id.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(sent.status, "sent");
+    a.forget(&bid).unwrap();
+    assert!(a.trusted(&bid).is_err());
+    assert!(a.store.lock().trust(&saved_peer).is_err());
+    // Discovery and a probe already in flight must not resurrect the removed entry.
+    a.see(b.local.lock().clone(), std::net::Ipv4Addr::LOCALHOST)
+        .unwrap();
+    assert!(a.snapshot().unwrap().peers.is_empty());
+    assert!(a.snapshot().unwrap().pairings.is_empty());
+    assert!(a.peer(&bid).is_err());
+    let failed = network::send(b.clone(), aid.clone(), "撤销后不能发送".into(), vec![])
+        .await
+        .unwrap();
+    assert_eq!(failed.status, "failed");
+    let device = a.local.lock().clone();
+    let requester = b.local.lock().clone();
+    let response = network::client(&device, "127.0.0.1")
+        .unwrap()
+        .post(format!("https://pcmessage.local:{}/v1/pair", device.port))
+        .json(&network::PairRequest {
+            id: uuid::Uuid::new_v4().to_string(),
+            device: requester,
+            secret: "a".repeat(64),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+    drop(a_server);
+    drop(a);
+    let restored = Core::create(ar.path().into(), 0, events()).unwrap();
+    let _restored_server = Running::start(restored.clone(), false).await.unwrap();
+    ready(&restored).await;
+    restored
+        .see(b.local.lock().clone(), std::net::Ipv4Addr::LOCALHOST)
+        .unwrap();
+    assert!(restored.snapshot().unwrap().peers.is_empty());
+    assert_eq!(
+        restored.store.lock().messages(&bid, 100).unwrap()[0].id,
+        sent.id
+    );
+    assert_eq!(
+        restored.asset_bytes(&attachment.id).unwrap(),
+        b"keep this file"
+    );
+    let bport = b.local.lock().port;
+    network::add_address(&restored, &format!("127.0.0.1:{bport}"))
+        .await
+        .unwrap();
+    assert_eq!(restored.snapshot().unwrap().peers.len(), 1);
+    assert!(!restored.snapshot().unwrap().peers[0].paired);
+    pair(&restored, &b).await;
+    let reply = network::send(
+        restored.clone(),
+        bid.clone(),
+        "重新配对后发送".into(),
+        vec![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply.status, "sent");
+    assert_eq!(restored.store.lock().messages(&bid, 100).unwrap().len(), 2);
+}
 async fn ready(core: &Arc<Core>) {
     let device = core.local.lock().clone();
     let client = network::client(&device, "127.0.0.1").unwrap();

@@ -68,7 +68,7 @@ Windows 构建（在 Windows 上执行）：
 npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
 
-安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.2.1_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.2.2_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
 
 ## 功能范围
 
@@ -76,6 +76,7 @@ npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locke
 - 每条文字最多 256 KiB；最多 8 个附件；单个文件最多 100 MiB；文字与附件合计最多 200 MiB。文件夹请先压缩。
 - PNG、JPEG、GIF 和 WebP 在不超过 15 MiB / 2500 万像素时显示图片预览，其余图片作为文件发送。Markdown 中的 HTTPS 图片默认不加载，点击后才加载；粘贴文字里的本地图片路径需要改为发送图片附件。
 - IPv4 家庭局域网直连；没有账号、云服务、群聊和跨公网连接。
+- 选择电脑后，可在右上角“移除设备”：解除配对并从列表隐藏，重启或自动发现都不会重新显示。聊天记录与附件保留，需要恢复时用 IP 重新添加并配对。
 - HTTPS 传输，首次核对配对码，之后固定信任设备证书。配对码比较时，两台电脑都应由你操作。消息数据库没有做额外的静态加密。
 
 ## 网络与数据

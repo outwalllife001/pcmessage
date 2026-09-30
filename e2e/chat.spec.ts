@@ -183,6 +183,10 @@ async function desktop(page: Page) {
           return;
         }
         if (cmd === "add_peer") return "mini";
+        if (cmd === "forget_peer") {
+          state.peers = state.peers.filter((p) => p.id !== args.peerId);
+          return;
+        }
         if (cmd === "rename_device") {
           state.local.name = args.name;
           return;
@@ -195,6 +199,44 @@ async function desktop(page: Page) {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Windows 11" })).toBeVisible();
 }
+test("removing devices supports cancel, hides offline entries and clears the last conversation", async ({
+  page,
+}) => {
+  await desktop(page);
+  await page.getByRole("button", { name: "卧室电脑" }).click();
+  await page.getByRole("button", { name: "移除设备", exact: true }).click();
+  const dialog = page.locator("#remove-dialog");
+  await expect(dialog).toContainText("解除配对，保留聊天记录。");
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(page.getByRole("button", { name: "卧室电脑" })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.calls.filter((c: any) => c.cmd === "forget_peer")
+          .length,
+    ),
+  ).toBe(0);
+  await page.getByRole("button", { name: "移除设备", exact: true }).click();
+  await dialog.getByRole("button", { name: "移除", exact: true }).click();
+  await expect(page.getByRole("button", { name: "卧室电脑" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Windows 11", exact: true }),
+  ).toBeVisible();
+  for (const name of ["客厅 Mac mini", "Windows 11"]) {
+    await page.getByRole("button", { name }).click();
+    await page.getByRole("button", { name: "移除设备", exact: true }).click();
+    await dialog.getByRole("button", { name: "移除", exact: true }).click();
+    await expect(page.getByRole("button", { name })).toHaveCount(0);
+  }
+  await expect(
+    page.getByRole("heading", { name: "选一台电脑，发条消息。", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "消息内容" })).toBeHidden();
+  expect(await page.evaluate(() => (window as any).__mock.history.length)).toBe(
+    2,
+  );
+});
+
 test("Markdown chat, original copy, preview, image attachment and send shortcut", async ({
   page,
 }, testInfo) => {

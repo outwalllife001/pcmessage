@@ -103,6 +103,9 @@ impl Core {
             })
             .collect();
         for (id, s) in seen.iter() {
+            if self.store.lock().is_hidden(id)? {
+                continue;
+            }
             let paired = trusted
                 .iter()
                 .any(|t| t.device.id == *id && t.device.certificate == s.device.certificate);
@@ -146,6 +149,9 @@ impl Core {
             return Ok(());
         }
         let mut seen = self.seen.lock();
+        if self.store.lock().is_hidden(&device.id)? {
+            return Ok(());
+        }
         if seen.len() >= 128 && !seen.contains_key(&device.id) {
             seen.retain(|_, s| s.at.elapsed() < Duration::from_secs(18));
             if seen.len() >= 128 {
@@ -192,11 +198,26 @@ impl Core {
         Ok(trusted)
     }
     pub fn peer(&self, id: &str) -> Result<(Device, String), String> {
+        if self.store.lock().is_hidden(id)? {
+            return Err("设备已移除，请重新添加".into());
+        }
         if let Some(s) = self.seen.lock().get(id) {
             return Ok((s.device.clone(), s.address.clone()));
         }
         let p = self.trusted(id)?;
         Ok((p.device, p.address))
+    }
+    pub fn forget(&self, id: &str) -> Result<(), String> {
+        // Use the same lock order as discovery/snapshot and pairing confirmation.
+        let mut seen = self.seen.lock();
+        let mut pending = self.pending.lock();
+        self.store.lock().forget(id)?;
+        seen.remove(id);
+        pending.retain(|_, p| p.device.id != id);
+        drop(pending);
+        drop(seen);
+        self.changed();
+        Ok(())
     }
     pub fn rename(&self, name: &str) -> Result<(), String> {
         let name = name.trim();

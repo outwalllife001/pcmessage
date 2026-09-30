@@ -48,7 +48,8 @@ app.innerHTML = `
 <dialog id="add-dialog"><form id="add-form"><div class="dialog-heading"><h2>添加电脑</h2><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div><label for="address">对方电脑的 IP</label><input id="address" placeholder="192.168.1.20" autocomplete="off" required /><p class="subtle">可在对方 PCMessage 的设置中查看。</p><button class="primary" id="connect">连接</button></form></dialog>
 <dialog id="settings-dialog"><form id="settings-form"><div class="dialog-heading"><h2>设置</h2><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div><label for="device-name">电脑名</label><input id="device-name" maxlength="40" required /><div class="address-box"><span class="subtle">本机地址</span><div id="addresses"></div></div><p class="subtle">关闭窗口后继续接收。完全退出请使用托盘菜单。</p><button class="primary">保存</button></form></dialog>
 <dialog id="pair-dialog"><div class="dialog-heading"><h2>确认配对</h2></div><div id="pair-content"></div></dialog>
-<dialog id="image-dialog"><div class="lightbox-toolbar"><button class="secondary" id="save-lightbox">另存图片</button><button class="icon-button close-dialog" aria-label="关闭">×</button></div><img id="lightbox-image" alt="图片预览" /></dialog>`;
+<dialog id="image-dialog"><div class="lightbox-toolbar"><button class="secondary" id="save-lightbox">另存图片</button><button class="icon-button close-dialog" aria-label="关闭">×</button></div><img id="lightbox-image" alt="图片预览" /></dialog>
+<dialog id="remove-dialog"><form method="dialog"><div class="dialog-heading"><h2>移除设备</h2></div><p id="remove-name"></p><p class="subtle">解除配对，保留聊天记录。</p><div class="dialog-actions"><button class="secondary" value="cancel">取消</button><button class="primary" value="remove">移除</button></div></form></dialog>`;
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -69,6 +70,7 @@ let toastTimer: ReturnType<typeof setTimeout>;
 let refreshing = false;
 let refreshAgain = false;
 let lightboxId = "";
+let removeId = "";
 const imageCache = new Map<string, Promise<string>>();
 const drafts = new Map<string, Draft>();
 $("shortcut").textContent = "Enter 发送 · Shift + Enter 换行";
@@ -157,7 +159,7 @@ function renderHeader() {
   const p = peer();
   if (!p) return;
   $("conversation-header").innerHTML =
-    `<div class="header-peer"><span class="header-avatar">${icons.computer}</span><div><h1>${e(p.name)}</h1><span class="subtle">${p.online ? "在线" : "离线"} · ${e(p.address)}</span></div></div>${p.paired ? '<button class="text-button" id="forget">取消配对</button>' : ""}`;
+    `<div class="header-peer"><span class="header-avatar">${icons.computer}</span><div><h1>${e(p.name)}</h1><span class="subtle">${p.online ? "在线" : "离线"} · ${e(p.address)}</span></div></div><button class="text-button" id="forget">移除设备</button>`;
   $("composer").hidden = !p.paired;
   $("pair-bar").hidden = p.paired;
   if (!p.paired)
@@ -176,6 +178,8 @@ function updateSend() {
     `${sending ? "发送中" : staging ? "准备附件…" : "发送"} ${icons.send}`;
   $<HTMLButtonElement>("attach").disabled = sending || staging;
   input.readOnly = sending || staging;
+  const remove = document.getElementById("forget") as HTMLButtonElement | null;
+  if (remove) remove.disabled = sending || staging;
 }
 function isImage(attachment: Attachment): boolean {
   return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
@@ -462,10 +466,22 @@ $("conversation-header").onclick = (event) => {
   if (
     (event.target as HTMLElement).closest("#forget") &&
     selected &&
-    confirm("取消与这台电脑的配对？消息记录会保留。")
-  )
+    !sending &&
+    !staging
+  ) {
+    removeId = selected;
+    $("remove-name").textContent = `移除「${peer()?.name ?? "这台电脑"}」？`;
+    const dialog = $<HTMLDialogElement>("remove-dialog");
+    dialog.returnValue = "";
+    dialog.showModal();
+  }
+};
+$("remove-dialog").onclose = () => {
+  const id = removeId;
+  removeId = "";
+  if (id && $<HTMLDialogElement>("remove-dialog").returnValue === "remove")
     void action(async () => {
-      await invoke("forget_peer", { peerId: selected });
+      await invoke("forget_peer", { peerId: id });
       await refresh();
     });
 };
