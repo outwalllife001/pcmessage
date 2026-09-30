@@ -62,7 +62,7 @@ Windows 构建（在 Windows 上执行）：
 npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
 
-安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.1.0_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.1.1_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
 
 ## 第一版边界
 
@@ -86,3 +86,10 @@ Windows 将家庭网络设为“专用”，允许 PCMessage 通过防火墙；M
 这里包含 SQLite 记录、图片、设备证书和配对凭证。更换电脑/迁移数据时关闭应用后整体备份；不要只删除证书。取消配对保留原有消息。
 
 实现使用 Tauri、Rust、TypeScript、markdown-it、DOMPurify 和 SQLite。见[实现说明](docs/PLAN.md)与[项目调研](docs/RESEARCH.md)。
+
+### Mac 能接收，但发不出去
+
+在 Mac 的 **系统设置 → 隐私与安全 → 本地网络** 中，检查 PCMessage。
+如果开关已开启但仍无法发送，关闭后重新开启，再完全退出并重启 PCMessage。
+本次实际排查中，Windows 的端口和配对凭证正常，重新开关 Mac 的本地网络权限后恢复双向通信。
+0.1.1 会保存并显示发送失败的具体原因；已配对的电脑显示离线时，也可以尝试发送。

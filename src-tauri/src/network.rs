@@ -598,14 +598,19 @@ pub async fn send(
         direction: "outgoing".into(),
         status: "sending".into(),
         unread: false,
+        delivery_error: None,
     };
     c.store.lock().insert(&message, &wire.digest())?;
     c.changed();
     let result = transmit(&c, &peer_id, &wire).await;
+    message.delivery_error = result.as_ref().err().cloned();
     message.status = if result.is_ok() { "sent" } else { "failed" }.into();
-    c.store
-        .lock()
-        .status(&peer_id, &message.id, &message.status)?;
+    c.store.lock().status(
+        &peer_id,
+        &message.id,
+        &message.status,
+        message.delivery_error.as_deref(),
+    )?;
     c.changed();
     // A failed transmission is still a saved message with its original ID for retry.
     Ok(message)
@@ -615,7 +620,7 @@ pub async fn retry(c: Arc<Core>, peer_id: String, id: String) -> Result<Message,
     if message.status == "sent" {
         return Ok(message);
     }
-    c.store.lock().status(&peer_id, &id, "sending")?;
+    c.store.lock().status(&peer_id, &id, "sending", None)?;
     c.changed();
     let wire = WireMessage {
         id: message.id.clone(),
@@ -624,8 +629,14 @@ pub async fn retry(c: Arc<Core>, peer_id: String, id: String) -> Result<Message,
         created_at: message.created_at,
     };
     let result = transmit(&c, &peer_id, &wire).await;
+    message.delivery_error = result.as_ref().err().cloned();
     message.status = if result.is_ok() { "sent" } else { "failed" }.into();
-    c.store.lock().status(&peer_id, &id, &message.status)?;
+    c.store.lock().status(
+        &peer_id,
+        &id,
+        &message.status,
+        message.delivery_error.as_deref(),
+    )?;
     c.changed();
     Ok(message)
 }
@@ -656,7 +667,25 @@ async fn transmit(c: &Arc<Core>, peer_id: &str, wire: &WireMessage) -> Result<()
         .multipart(form)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let mut details = e.to_string();
+            let mut source = std::error::Error::source(&e);
+            while let Some(cause) = source {
+                details.push_str(&format!("：{cause}"));
+                source = cause.source();
+            }
+            #[cfg(target_os = "macos")]
+            if details.contains("os error 65") || details.contains("os error 13") {
+                return format!(
+                    "无法连接 {}:{}。请检查 Mac 的“本地网络”权限；若已开启，可关闭后重新开启，再重启 PCMessage。",
+                    peer.address, peer.device.port
+                );
+            }
+            if e.is_timeout() {
+                return format!("连接 {}:{} 超时，请检查对方 PCMessage 和防火墙。", peer.address, peer.device.port);
+            }
+            format!("无法连接 {}:{}：{details}", peer.address, peer.device.port)
+        })?;
     if !response.status().is_success() {
         return Err(format!("发送失败：{}", response.status()));
     }

@@ -71,6 +71,8 @@ pub struct Message {
     pub direction: String,
     pub status: String,
     pub unread: bool,
+    #[serde(default)]
+    pub delivery_error: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireMessage {

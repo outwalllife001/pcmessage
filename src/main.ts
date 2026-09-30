@@ -167,12 +167,8 @@ function renderHeader() {
 function updateSend() {
   const p = peer();
   $<HTMLButtonElement>("send").disabled =
-    sending ||
-    !p?.paired ||
-    !p.online ||
-    (!input.value.trim() && !draft.images.length);
-  $("send").innerHTML =
-    `${sending ? "发送中" : p && !p.online ? "设备离线" : "发送"} ${icons.send}`;
+    sending || !p?.paired || (!input.value.trim() && !draft.images.length);
+  $("send").innerHTML = `${sending ? "发送中" : "发送"} ${icons.send}`;
   $<HTMLButtonElement>("attach").disabled = sending;
   input.readOnly = sending;
 }
@@ -214,7 +210,7 @@ function renderMessages() {
       hour: "2-digit",
       minute: "2-digit",
     });
-  messageList.innerHTML = `${messages.length >= limit ? '<button class="text-button load-more" id="older">更早的消息</button>' : ""}${messages.map((m) => `<article class="message ${m.direction}" data-message="${e(m.id)}"><div class="message-meta"><strong>${m.direction === "outgoing" ? "我" : e(p.name)}</strong><time datetime="${new Date(m.created_at).toISOString()}">${date(m.created_at)}</time></div><div class="bubble"><div class="markdown">${renderMarkdown(m.text)}</div>${m.images.length ? `<div class="message-images">${m.images.map((a) => `<button class="image-button" data-open-image="${e(a.id)}" aria-label="查看 ${e(a.name)}"><img data-asset="${e(a.id)}" alt="${e(a.name)}" /></button>`).join("")}</div>` : ""}</div><div class="message-tools">${m.text ? `<button class="text-button" data-copy="${e(m.id)}" data-direction="${m.direction}">复制原文</button>` : ""}${m.direction === "outgoing" ? (m.status === "failed" ? `<button class="retry text-button" data-retry="${e(m.id)}">发送失败 · 重试</button>` : `<span>${m.status === "sending" ? "发送中…" : "已发送"}</span>`) : ""}</div></article>`).join("")}`;
+  messageList.innerHTML = `${messages.length >= limit ? '<button class="text-button load-more" id="older">更早的消息</button>' : ""}${messages.map((m) => `<article class="message ${m.direction}" data-message="${e(m.id)}"><div class="message-meta"><strong>${m.direction === "outgoing" ? "我" : e(p.name)}</strong><time datetime="${new Date(m.created_at).toISOString()}">${date(m.created_at)}</time></div><div class="bubble"><div class="markdown">${renderMarkdown(m.text)}</div>${m.images.length ? `<div class="message-images">${m.images.map((a) => `<button class="image-button" data-open-image="${e(a.id)}" aria-label="查看 ${e(a.name)}"><img data-asset="${e(a.id)}" alt="${e(a.name)}" /></button>`).join("")}</div>` : ""}</div><div class="message-tools">${m.text ? `<button class="text-button" data-copy="${e(m.id)}" data-direction="${m.direction}">复制原文</button>` : ""}${m.direction === "outgoing" ? (m.status === "failed" ? `<button class="retry text-button" data-retry="${e(m.id)}">发送失败 · 重试</button>${m.delivery_error ? `<span class="delivery-error">${e(m.delivery_error)}</span>` : ""}` : `<span>${m.status === "sending" ? "发送中…" : "已发送"}</span>`) : ""}</div></article>`).join("")}`;
   void hydrateImages(messageList).then(() => {
     if (nearBottom || previousPeer !== selected)
       messageList.scrollTop = messageList.scrollHeight;
@@ -354,7 +350,8 @@ async function send() {
     saveDraft();
     preview = false;
     renderDraft();
-    if (message.status === "failed") toast("发送失败，消息已保留，可点击重试");
+    if (message.status === "failed")
+      toast(message.delivery_error || "发送失败，消息已保留，可点击重试");
   } catch (error) {
     toast(error);
   } finally {
@@ -530,11 +527,17 @@ messageList.onclick = (event) => {
       toast("代码已复制");
     } else if (element.dataset.retry && selected) {
       (element as HTMLButtonElement).disabled = true;
-      await invoke("retry_message", {
-        peerId: selected,
-        id: element.dataset.retry,
-      });
-      await refresh();
+      try {
+        const retried = await invoke<Message>("retry_message", {
+          peerId: selected,
+          id: element.dataset.retry,
+        });
+        if (retried.status === "failed")
+          toast(retried.delivery_error || "发送失败");
+        await refresh();
+      } finally {
+        (element as HTMLButtonElement).disabled = false;
+      }
     } else if (element.dataset.openImage) {
       lightboxId = element.dataset.openImage;
       $<HTMLImageElement>("lightbox-image").src = await imageUrl(lightboxId);

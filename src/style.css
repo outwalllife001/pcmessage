@@ -853,3 +853,11 @@ input {
 .code-block pre {
   padding-top: 30px;
 }
+.delivery-error {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: #a56c48;
+}
+.message-tools {
+  flex-wrap: wrap;
+}

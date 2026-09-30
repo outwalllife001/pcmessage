@@ -120,6 +120,19 @@ async fn encrypted_pairing_text_images_dedup_restart_and_retry() {
         .await
         .unwrap();
     assert_eq!(failed.status, "failed");
+    assert!(failed
+        .delivery_error
+        .as_deref()
+        .unwrap()
+        .contains("127.0.0.1"));
+    assert_eq!(
+        a.store
+            .lock()
+            .outgoing(&bid, &failed.id)
+            .unwrap()
+            .delivery_error,
+        failed.delivery_error
+    );
     let restored = Core::create(br.path().into(), bport, events()).unwrap();
     let _b_server = Running::start(restored.clone(), false).await.unwrap();
     ready(&restored).await;
@@ -130,6 +143,7 @@ async fn encrypted_pairing_text_images_dedup_restart_and_retry() {
         .await
         .unwrap();
     assert_eq!(retried.status, "sent");
+    assert!(retried.delivery_error.is_none());
     assert_eq!(retried.id, failed.id);
     assert_eq!(restored.store.lock().messages(&aid, 100).unwrap().len(), 3);
 }
@@ -224,4 +238,32 @@ fn bounded_messages_images_and_identity() {
     drop(c);
     let restored = Core::create(root.path().into(), 47321, events()).unwrap();
     assert_eq!(restored.local.lock().name, "书房 Mac");
+}
+
+#[test]
+fn upgrade_keeps_existing_messages_and_delivery_errors() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("messages.sqlite");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TABLE messages (peer_id TEXT NOT NULL, id TEXT NOT NULL, direction TEXT NOT NULL, text TEXT NOT NULL, images TEXT NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, unread INTEGER NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(peer_id,id,direction));
+        INSERT INTO messages VALUES ('peer','message','outgoing','升级前的消息','[]',1,'failed',0,'digest');").unwrap();
+    drop(db);
+    let store = pcmessage_lib::storage::Store::open(&path).unwrap();
+    let messages = store.messages("peer", 100).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].text, "升级前的消息");
+    assert!(messages[0].delivery_error.is_none());
+    store
+        .status("peer", "message", "failed", Some("连接超时"))
+        .unwrap();
+    drop(store);
+    let restored = pcmessage_lib::storage::Store::open(&path).unwrap();
+    assert_eq!(
+        restored
+            .outgoing("peer", "message")
+            .unwrap()
+            .delivery_error
+            .as_deref(),
+        Some("连接超时")
+    );
 }

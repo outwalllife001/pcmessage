@@ -13,6 +13,11 @@ impl Store {
             CREATE TABLE IF NOT EXISTS peers (id TEXT PRIMARY KEY, device TEXT NOT NULL, address TEXT NOT NULL, token TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS messages (peer_id TEXT NOT NULL, id TEXT NOT NULL, direction TEXT NOT NULL, text TEXT NOT NULL, images TEXT NOT NULL, created_at INTEGER NOT NULL, status TEXT NOT NULL, unread INTEGER NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(peer_id,id,direction));
             CREATE INDEX IF NOT EXISTS history ON messages(peer_id,created_at);") .map_err(|e| e.to_string())?;
+        let has_error: bool = db.query_row("SELECT count(*) > 0 FROM pragma_table_info('messages') WHERE name='delivery_error'", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if !has_error {
+            db.execute("ALTER TABLE messages ADD COLUMN delivery_error TEXT", [])
+                .map_err(|e| e.to_string())?;
+        }
         Ok(Self { db })
     }
     pub fn setting(&self, key: &str) -> Result<Option<String>, String> {
@@ -88,7 +93,7 @@ impl Store {
     pub fn insert(&self, message: &Message, digest: &str) -> Result<(), String> {
         self.db
             .execute(
-                "INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                "INSERT INTO messages (peer_id,id,direction,text,images,created_at,status,unread,digest,delivery_error) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 params![
                     message.peer_id,
                     message.id,
@@ -98,7 +103,8 @@ impl Store {
                     message.created_at,
                     message.status,
                     message.unread,
-                    digest
+                    digest,
+                    message.delivery_error
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -120,17 +126,23 @@ impl Store {
             None => Ok(false),
         }
     }
-    pub fn status(&self, peer: &str, id: &str, status: &str) -> Result<(), String> {
+    pub fn status(
+        &self,
+        peer: &str,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<(), String> {
         self.db
             .execute(
-                "UPDATE messages SET status=?3 WHERE peer_id=?1 AND id=?2 AND direction='outgoing'",
-                params![peer, id, status],
+                "UPDATE messages SET status=?3,delivery_error=?4 WHERE peer_id=?1 AND id=?2 AND direction='outgoing'",
+                params![peer, id, status, error],
             )
             .map_err(|e| e.to_string())?;
         Ok(())
     }
     pub fn messages(&self, peer: &str, limit: usize) -> Result<Vec<Message>, String> {
-        let mut stmt=self.db.prepare("SELECT id,peer_id,text,images,created_at,direction,status,unread FROM (SELECT rowid,* FROM messages WHERE peer_id=?1 ORDER BY rowid DESC LIMIT ?2) ORDER BY rowid").map_err(|e|e.to_string())?;
+        let mut stmt=self.db.prepare("SELECT id,peer_id,text,images,created_at,direction,status,unread,delivery_error FROM (SELECT rowid,* FROM messages WHERE peer_id=?1 ORDER BY rowid DESC LIMIT ?2) ORDER BY rowid").map_err(|e|e.to_string())?;
         let rows = stmt
             .query_map(params![peer, limit], |r| {
                 Ok((
@@ -142,11 +154,12 @@ impl Store {
                     r.get::<_, String>(5)?,
                     r.get::<_, String>(6)?,
                     r.get::<_, bool>(7)?,
+                    r.get::<_, Option<String>>(8)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
         rows.map(|row| {
-            let (id, peer_id, text, images, created_at, direction, status, unread) =
+            let (id, peer_id, text, images, created_at, direction, status, unread, delivery_error) =
                 row.map_err(|e| e.to_string())?;
             Ok(Message {
                 id,
@@ -157,15 +170,16 @@ impl Store {
                 direction,
                 status,
                 unread,
+                delivery_error,
             })
         })
         .collect()
     }
     pub fn outgoing(&self, peer: &str, id: &str) -> Result<Message, String> {
-        let (text, images, created_at, status): (String, String, i64, String) = self.db.query_row(
-            "SELECT text,images,created_at,status FROM messages WHERE peer_id=?1 AND id=?2 AND direction='outgoing'",
+        let (text, images, created_at, status, delivery_error): (String, String, i64, String, Option<String>) = self.db.query_row(
+            "SELECT text,images,created_at,status,delivery_error FROM messages WHERE peer_id=?1 AND id=?2 AND direction='outgoing'",
             params![peer, id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         ).map_err(|e| e.to_string())?;
         Ok(Message {
             id: id.into(),
@@ -176,6 +190,7 @@ impl Store {
             direction: "outgoing".into(),
             status,
             unread: false,
+            delivery_error,
         })
     }
     pub fn unread(&self, peer: &str) -> usize {

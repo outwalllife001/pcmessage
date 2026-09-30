@@ -28,6 +28,7 @@ export interface Message {
   direction: "incoming" | "outgoing";
   status: "sending" | "sent" | "failed";
   unread: boolean;
+  delivery_error?: string | null;
 }
 export interface Pairing {
   id: string;

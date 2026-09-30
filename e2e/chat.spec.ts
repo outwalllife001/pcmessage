@@ -112,6 +112,9 @@ async function desktop(page: Page) {
             created_at: Date.now(),
             direction: "outgoing",
             status: w.__mock.failSend ? "failed" : "sent",
+            delivery_error: w.__mock.failSend
+              ? "无法连接 192.168.1.20:47321：连接超时"
+              : null,
             unread: false,
           };
           history.push(m);
@@ -119,7 +122,10 @@ async function desktop(page: Page) {
         }
         if (cmd === "retry_message") {
           const m = history.find((m) => m.id === args.id);
-          m.status = "sent";
+          m.status = w.__mock.failRetry ? "failed" : "sent";
+          m.delivery_error = w.__mock.failRetry
+            ? "无法连接 192.168.1.20:47321：连接超时"
+            : null;
           return structuredClone(m);
         }
         if (cmd === "plugin:clipboard-manager|write_text") {
@@ -195,8 +201,11 @@ test("per-device drafts, offline state and failed-message retry", async ({
   await desktop(page);
   await page.locator("#text").fill("还没发送的草稿");
   await page.getByRole("button", { name: /卧室电脑/ }).click();
-  await expect(page.getByRole("button", { name: "设备离线" })).toBeDisabled();
+  await expect(page.locator("#conversation-header")).toContainText("离线");
   await page.locator("#text").fill("离线草稿");
+  await expect(
+    page.getByRole("button", { name: "发送", exact: true }),
+  ).toBeEnabled();
   await page.getByRole("button", { name: /Windows 11 在线/ }).click();
   await expect(page.locator("#text")).toHaveValue("还没发送的草稿");
   await page.evaluate(() => ((window as any).__mock.failSend = true));
@@ -204,6 +213,7 @@ test("per-device drafts, offline state and failed-message retry", async ({
   await expect(
     page.getByRole("button", { name: "发送失败 · 重试" }),
   ).toBeVisible();
+  await expect(page.locator(".delivery-error")).toContainText("连接超时");
   await page.getByRole("button", { name: "发送失败 · 重试" }).click();
   await expect(
     page.getByRole("button", { name: "发送失败 · 重试" }),
@@ -255,4 +265,23 @@ test("remote images remain unloaded until clicked and pasted image bytes are sen
           .args.bytes,
     ),
   ).toEqual([137, 80, 78, 71]);
+});
+
+test("a repeated failed retry remains available and keeps its error", async ({
+  page,
+}) => {
+  await desktop(page);
+  await page.evaluate(() => {
+    (window as any).__mock.failSend = true;
+    (window as any).__mock.failRetry = true;
+  });
+  await page.locator("#text").fill("重试失败也可以再次重试");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  const retry = page.getByRole("button", { name: "发送失败 · 重试" });
+  await retry.click();
+  await expect(retry).toBeEnabled();
+  await expect(page.locator(".delivery-error")).toContainText("连接超时");
+  await page.evaluate(() => ((window as any).__mock.failRetry = false));
+  await retry.click();
+  await expect(retry).toHaveCount(0);
 });

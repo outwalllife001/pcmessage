@@ -285,6 +285,7 @@ impl Core {
             direction: "incoming".into(),
             status: "sent".into(),
             unread: true,
+            delivery_error: None,
         };
         self.store.lock().insert(&message, &digest)?;
         self.changed();
