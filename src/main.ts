@@ -17,8 +17,9 @@ const icons = {
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>',
   settings:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="m10 3-1 3-3 1-3-1-1 4 2 2-1 3 2 3 3-1 2 3h4l1-3 3-1 3 1 1-4-2-2 1-3-2-3-3 1-2-3h-4Z"/></svg>',
-  image:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/></svg>',
+  file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H6v18h12V7l-4-4Z"/><path d="M14 3v5h4M9 13h6M9 17h4"/></svg>',
+  attachment:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8"/><path d="m8 12 6-6"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 12 14-7-5 14-3-6-6-1Z"/><path d="m11 13 8-8"/></svg>',
   computer:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
@@ -34,12 +35,12 @@ app.innerHTML = `
 <main>
   <header id="conversation-header"><div><h1>消息</h1><span class="subtle">在你的电脑之间</span></div></header>
   <div id="network-error" class="network-error" hidden></div>
-  <section id="messages" aria-label="消息记录"><div class="empty"><span class="empty-icon">${icons.chat}</span><h2>选一台电脑，发条消息。</h2><p>文字、代码，或一张截图。</p><button class="secondary" id="empty-add">添加电脑</button></div></section>
+  <section id="messages" aria-label="消息记录"><div class="empty"><span class="empty-icon">${icons.chat}</span><h2>选一台电脑，发条消息。</h2><p>文字、截图，或文件。</p><button class="secondary" id="empty-add">添加电脑</button></div></section>
   <section id="composer" hidden aria-label="发送消息">
     <div id="draft-images" class="draft-images"></div>
     <div id="preview" class="markdown preview" hidden></div>
     <textarea id="text" placeholder="写点什么…" aria-label="消息内容" spellcheck="false"></textarea>
-    <div class="composer-toolbar"><div class="composer-actions"><button class="icon-button" id="attach" title="添加图片" aria-label="添加图片">${icons.image}</button><button class="text-button" id="toggle-preview" aria-pressed="false">预览</button><span class="format-hint">Markdown</span></div><div class="send-actions"><span id="shortcut"></span><button class="primary" id="send">发送 ${icons.send}</button></div></div>
+    <div class="composer-toolbar"><div class="composer-actions"><button class="icon-button" id="attach" title="添加文件" aria-label="添加文件">${icons.attachment}</button><button class="text-button" id="toggle-preview" aria-pressed="false">预览</button><span class="format-hint">Markdown</span></div><div class="send-actions"><span id="shortcut"></span><button class="primary" id="send">发送 ${icons.send}</button></div></div>
   </section>
   <div id="pair-bar" hidden></div>
 </main>
@@ -60,6 +61,7 @@ let messages: Message[] = [];
 let draft: Draft = { text: "", images: [] };
 let preview = false;
 let sending = false;
+let staging = false;
 let limit = 100;
 let renderKey = "";
 let stateKey = "";
@@ -166,16 +168,43 @@ function renderHeader() {
 function updateSend() {
   const p = peer();
   $<HTMLButtonElement>("send").disabled =
-    sending || !p?.paired || (!input.value.trim() && !draft.images.length);
-  $("send").innerHTML = `${sending ? "发送中" : "发送"} ${icons.send}`;
-  $<HTMLButtonElement>("attach").disabled = sending;
-  input.readOnly = sending;
+    sending ||
+    staging ||
+    !p?.paired ||
+    (!input.value.trim() && !draft.images.length);
+  $("send").innerHTML =
+    `${sending ? "发送中" : staging ? "准备附件…" : "发送"} ${icons.send}`;
+  $<HTMLButtonElement>("attach").disabled = sending || staging;
+  input.readOnly = sending || staging;
+}
+function isImage(attachment: Attachment): boolean {
+  return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+    attachment.mime,
+  );
+}
+function fileSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+function renderAttachments(attachments: Attachment[]): string {
+  const images = attachments.filter(isImage);
+  const files = attachments.filter((a) => !isImage(a));
+  return (
+    (images.length
+      ? `<div class="message-images">${images.map((a) => `<button class="image-button" data-open-image="${e(a.id)}" aria-label="查看 ${e(a.name)}"><img data-asset="${e(a.id)}" alt="${e(a.name)}" /></button>`).join("")}</div>`
+      : "") +
+    (files.length
+      ? `<div class="message-files">${files.map((a) => `<button class="file-card" data-save-file="${e(a.id)}" aria-label="保存文件 ${e(a.name)}">${icons.file}<span><strong>${e(a.name)}</strong><small>${fileSize(a.size)}</small></span><span class="file-save">另存</span></button>`).join("")}</div>`
+      : "")
+  );
 }
 function renderDraft() {
   $("draft-images").innerHTML = draft.images
-    .map(
-      (a) =>
-        `<div class="draft-image"><img data-asset="${e(a.id)}" alt="${e(a.name)}"/><button type="button" data-remove="${e(a.id)}" aria-label="移除 ${e(a.name)}">×</button></div>`,
+    .map((a) =>
+      isImage(a)
+        ? `<div class="draft-image"><img data-asset="${e(a.id)}" alt="${e(a.name)}"/><button type="button" data-remove="${e(a.id)}" aria-label="移除 ${e(a.name)}">×</button></div>`
+        : `<div class="draft-file">${icons.file}<span><strong>${e(a.name)}</strong><small>${fileSize(a.size)}</small></span><button type="button" class="icon-button" data-remove="${e(a.id)}" aria-label="移除 ${e(a.name)}">×</button></div>`,
     )
     .join("");
   void hydrateImages($("draft-images"));
@@ -209,7 +238,7 @@ function renderMessages() {
       hour: "2-digit",
       minute: "2-digit",
     });
-  messageList.innerHTML = `${messages.length >= limit ? '<button class="text-button load-more" id="older">更早的消息</button>' : ""}${messages.map((m) => `<article class="message ${m.direction}" data-message="${e(m.id)}"><div class="message-meta"><strong>${m.direction === "outgoing" ? "我" : e(p.name)}</strong><time datetime="${new Date(m.created_at).toISOString()}">${date(m.created_at)}</time></div><div class="bubble"><div class="markdown">${renderMarkdown(m.text)}</div>${m.images.length ? `<div class="message-images">${m.images.map((a) => `<button class="image-button" data-open-image="${e(a.id)}" aria-label="查看 ${e(a.name)}"><img data-asset="${e(a.id)}" alt="${e(a.name)}" /></button>`).join("")}</div>` : ""}</div><div class="message-tools">${m.text ? `<button class="text-button" data-copy="${e(m.id)}" data-direction="${m.direction}">复制原文</button>` : ""}${m.direction === "outgoing" ? (m.status === "failed" ? `<button class="retry text-button" data-retry="${e(m.id)}">发送失败 · 重试</button>${m.delivery_error ? `<span class="delivery-error">${e(m.delivery_error)}</span>` : ""}` : `<span>${m.status === "sending" ? "发送中…" : "已发送"}</span>`) : ""}</div></article>`).join("")}`;
+  messageList.innerHTML = `${messages.length >= limit ? '<button class="text-button load-more" id="older">更早的消息</button>' : ""}${messages.map((m) => `<article class="message ${m.direction}" data-message="${e(m.id)}"><div class="message-meta"><strong>${m.direction === "outgoing" ? "我" : e(p.name)}</strong><time datetime="${new Date(m.created_at).toISOString()}">${date(m.created_at)}</time></div><div class="bubble"><div class="markdown">${renderMarkdown(m.text)}</div>${renderAttachments(m.images)}</div><div class="message-tools">${m.text ? `<button class="text-button" data-copy="${e(m.id)}" data-direction="${m.direction}">复制原文</button>` : ""}${m.direction === "outgoing" ? (m.status === "failed" ? `<button class="retry text-button" data-retry="${e(m.id)}">发送失败 · 重试</button>${m.delivery_error ? `<span class="delivery-error">${e(m.delivery_error)}</span>` : ""}` : `<span>${m.status === "sending" ? "发送中…" : "已发送"}</span>`) : ""}</div></article>`).join("")}`;
   void hydrateImages(messageList).then(() => {
     if (nearBottom || previousPeer !== selected)
       messageList.scrollTop = messageList.scrollHeight;
@@ -285,7 +314,7 @@ async function refresh() {
   }
 }
 async function selectPeer(id: string, reload = true) {
-  if (sending) return;
+  if (sending || staging) return;
   saveDraft();
   selected = id;
   limit = 100;
@@ -301,35 +330,55 @@ async function selectPeer(id: string, reload = true) {
   if (reload) await refresh();
   input.focus();
 }
-async function addImages(images: Attachment[]) {
+async function addAttachments(images: Attachment[]) {
   if (draft.images.length + images.length > 8) {
-    toast("每条消息最多 8 张图片");
+    toast("每条消息最多 8 个附件");
     return;
   }
   if (
     [...draft.images, ...images].reduce((sum, a) => sum + a.size, 0) >
-    32 * 1024 * 1024
+    200 * 1024 * 1024
   ) {
-    toast("一条消息最多 32 MB");
+    toast("一条消息最多 200 MB");
     return;
   }
   draft.images.push(...images);
   saveDraft();
   renderDraft();
 }
-async function pasteFiles(files: File[]) {
-  if (!selected || sending) return;
-  for (const file of files) {
-    if (file.size > 15 * 1024 * 1024) {
-      toast("单张图片最多 15 MB");
-      continue;
-    }
-    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    const asset = await action(() =>
-      invoke<Attachment>("stage_image", { bytes, name: file.name }),
-    );
-    if (asset) await addImages([asset]);
+async function stageAttachments(load: () => Promise<Attachment[]>) {
+  if (!peer()?.paired || sending || staging) return;
+  staging = true;
+  updateSend();
+  try {
+    await addAttachments(await load());
+  } finally {
+    staging = false;
+    updateSend();
   }
+}
+async function pasteFiles(files: File[]) {
+  await action(() =>
+    stageAttachments(async () => {
+      if (draft.images.length + files.length > 8) throw "每条消息最多 8 个附件";
+      if (files.some((file) => file.size > 100 * 1024 * 1024))
+        throw "单个文件最多 100 MB";
+      if (
+        files.reduce((sum, file) => sum + file.size, 0) +
+          draft.images.reduce((sum, a) => sum + a.size, 0) >
+        200 * 1024 * 1024
+      )
+        throw "一条消息最多 200 MB";
+      const attachments: Attachment[] = [];
+      for (const file of files) {
+        const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+        attachments.push(
+          await invoke<Attachment>("stage_file", { bytes, name: file.name }),
+        );
+      }
+      return attachments;
+    }),
+  );
 }
 async function send() {
   if ($<HTMLButtonElement>("send").disabled || !selected) return;
@@ -473,16 +522,16 @@ input.onkeydown = (event) => {
   }
 };
 input.onpaste = (event) => {
-  const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
-    f.type.startsWith("image/"),
-  );
+  const files = Array.from(event.clipboardData?.files ?? []);
   if (files.length) {
     event.preventDefault();
     void pasteFiles(files);
   } else if (!event.clipboardData?.getData("text/plain"))
     void action(async () => {
-      const image = await invoke<Attachment | null>("clipboard_image");
-      if (image) await addImages([image]);
+      await stageAttachments(async () => {
+        const image = await invoke<Attachment | null>("clipboard_image");
+        return image ? [image] : [];
+      });
     });
 };
 $("toggle-preview").onclick = () => {
@@ -492,8 +541,7 @@ $("toggle-preview").onclick = () => {
 };
 $("attach").onclick = () =>
   void action(async () => {
-    const images = await invoke<Attachment[]>("choose_images");
-    await addImages(images);
+    await stageAttachments(() => invoke<Attachment[]>("choose_files"));
   });
 $("draft-images").onclick = (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>(
@@ -538,6 +586,13 @@ messageList.onclick = (event) => {
       } finally {
         (element as HTMLButtonElement).disabled = false;
       }
+    } else if (element.dataset.saveFile) {
+      if (
+        await invoke<boolean>("save_attachment", {
+          id: element.dataset.saveFile,
+        })
+      )
+        toast("文件已保存");
     } else if (element.dataset.openImage) {
       lightboxId = element.dataset.openImage;
       $<HTMLImageElement>("lightbox-image").src = await imageUrl(lightboxId);
@@ -578,7 +633,7 @@ app.addEventListener("click", (event) => {
 });
 $("save-lightbox").onclick = () =>
   void action(async () => {
-    if (await invoke<boolean>("save_image", { id: lightboxId }))
+    if (await invoke<boolean>("save_attachment", { id: lightboxId }))
       toast("图片已保存");
   });
 window.addEventListener("focus", () => void refresh());
@@ -594,11 +649,7 @@ app.addEventListener("drop", (event) => {
   event.preventDefault();
   $("composer").classList.remove("dragging");
   if (peer()?.paired)
-    void pasteFiles(
-      Array.from(event.dataTransfer?.files ?? []).filter((f) =>
-        f.type.startsWith("image/"),
-      ),
-    );
+    void pasteFiles(Array.from(event.dataTransfer?.files ?? []));
 });
 async function start() {
   if (!isTauri()) {
@@ -617,10 +668,11 @@ async function start() {
   await getCurrentWebview().onDragDropEvent((event) => {
     if (event.payload.type === "drop" && peer()?.paired && !sending)
       void action(async () => {
-        const images = await invoke<Attachment[]>("stage_paths", {
-          paths: event.payload.type === "drop" ? event.payload.paths : [],
-        });
-        await addImages(images);
+        await stageAttachments(() =>
+          invoke<Attachment[]>("stage_paths", {
+            paths: event.payload.type === "drop" ? event.payload.paths : [],
+          }),
+        );
       });
     $("composer").classList.toggle("dragging", event.payload.type === "over");
   });

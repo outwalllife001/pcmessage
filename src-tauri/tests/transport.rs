@@ -77,7 +77,7 @@ async fn encrypted_pairing_text_images_dedup_restart_and_retry() {
     let received = b.store.lock().messages(&aid, 100).unwrap();
     assert_eq!(received.len(), 1);
     assert_eq!(received[0].text, text);
-    assert_eq!(b.image_bytes(&image.id).unwrap(), png());
+    assert_eq!(b.asset_bytes(&image.id).unwrap(), png());
     assert_eq!(b.store.lock().unread(&aid), 1);
     b.store.lock().mark_read(&aid).unwrap();
     assert_eq!(b.store.lock().unread(&aid), 0);
@@ -213,7 +213,7 @@ async fn unpaired_spoofed_and_tampered_payloads_are_rejected() {
         .await
         .is_err());
     assert!(network::add_address(&a, "8.8.8.8").await.is_err());
-    assert!(a.image_bytes("../../private-key.pem").is_err());
+    assert!(a.asset_bytes("../../private-key.pem").is_err());
 }
 
 #[test]
@@ -231,7 +231,9 @@ fn bounded_messages_images_and_identity() {
         created_at: now(),
     };
     assert!(wire.validate().is_err());
-    assert!(c.stage(b"<svg onload='alert(1)'/>", "bad.svg").is_err());
+    let svg = c.stage(b"<svg onload='alert(1)'/>", "drawing.svg").unwrap();
+    assert_eq!(svg.mime, "application/octet-stream");
+    assert!(c.image_url(&svg.id).is_err());
     assert!(c.rename("").is_err());
     assert!(c.rename(&"字".repeat(41)).is_err());
     c.rename("书房 Mac").unwrap();
@@ -266,4 +268,186 @@ fn upgrade_keeps_existing_messages_and_delivery_errors() {
             .as_deref(),
         Some("连接超时")
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn arbitrary_files_roundtrip_export_restart_and_retry() {
+    let ar = tempfile::tempdir().unwrap();
+    let br = tempfile::tempdir().unwrap();
+    let export = tempfile::tempdir().unwrap();
+    let a = Core::create(ar.path().into(), 0, events()).unwrap();
+    let b = Core::create(br.path().into(), 0, events()).unwrap();
+    let _a_server = Running::start(a.clone(), false).await.unwrap();
+    let b_server = Running::start(b.clone(), false).await.unwrap();
+    ready(&b).await;
+    pair(&a, &b).await;
+    let aid = a.local.lock().id.clone();
+    let bid = b.local.lock().id.clone();
+    let port = b.local.lock().port;
+    let cases = [
+        (
+            "计划.md",
+            "# 你好 Windows\n\n**中文** 🏠".as_bytes().to_vec(),
+        ),
+        ("资料.pdf", b"%PDF-1.4\0\xff\r\n".to_vec()),
+        ("archive.zip", b"PK\x03\x04\0\x80\xff".to_vec()),
+        ("program.exe", b"MZ\0\xff\x80".to_vec()),
+        (
+            "data.unknown",
+            (0..=255).cycle().take(1024 * 1024).collect(),
+        ),
+        ("empty.txt", vec![]),
+        ("drawing.svg", b"<svg onload='alert(1)'/>".to_vec()),
+        ("movie.mp4", b"\0\0\0\x18ftypmp42\xff\0".to_vec()),
+    ];
+    let attachments: Vec<_> = cases
+        .iter()
+        .map(|(name, bytes)| {
+            let path = ar.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let attachment = a.stage_path(&path).unwrap();
+            assert_eq!(attachment.name, *name);
+            assert_eq!(attachment.mime, "application/octet-stream");
+            assert!(a.image_url(&attachment.id).is_err());
+            attachment
+        })
+        .collect();
+    let sent = network::send(
+        a.clone(),
+        bid.clone(),
+        String::new(),
+        attachments.iter().map(|a| a.id.clone()).collect(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(sent.status, "sent", "{:?}", sent.delivery_error);
+    let received = b.store.lock().messages(&aid, 100).unwrap();
+    assert_eq!(received[0].images, attachments);
+    for (attachment, (name, bytes)) in attachments.iter().zip(&cases) {
+        assert_eq!(&b.asset_bytes(&attachment.id).unwrap(), bytes);
+        let destination = export.path().join(name);
+        b.export_attachment(&attachment.id, &destination).unwrap();
+        assert_eq!(&std::fs::read(destination).unwrap(), bytes);
+    }
+    // A payload with the wrong digest must never be accepted as an arbitrary file.
+    let trusted = a.trusted(&bid).unwrap();
+    let wire = WireMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        text: String::new(),
+        images: vec![attachments[0].clone()],
+        created_at: now(),
+    };
+    let response = network::client(&trusted.device, &trusted.address)
+        .unwrap()
+        .post(format!("https://pcmessage.local:{port}/v1/message"))
+        .header("x-peer-id", &aid)
+        .header("x-peer-token", &trusted.token)
+        .multipart(
+            reqwest::multipart::Form::new()
+                .text("message", serde_json::to_string(&wire).unwrap())
+                .part(
+                    attachments[0].id.clone(),
+                    reqwest::multipart::Part::bytes(b"changed".to_vec()),
+                ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert!(!response.status().is_success());
+    assert_eq!(b.store.lock().messages(&aid, 100).unwrap().len(), 1);
+    drop(b_server);
+    drop(b);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let failed = network::send(
+        a.clone(),
+        bid.clone(),
+        String::new(),
+        vec![attachments[0].id.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(failed.status, "failed");
+    let restored = Core::create(br.path().into(), port, events()).unwrap();
+    let _restored_server = Running::start(restored.clone(), false).await.unwrap();
+    ready(&restored).await;
+    assert_eq!(
+        restored.store.lock().messages(&aid, 100).unwrap()[0].images,
+        attachments
+    );
+    let retry = network::retry(a, bid, failed.id.clone()).await.unwrap();
+    assert_eq!(retry.status, "sent");
+    assert_eq!(retry.id, failed.id);
+    assert_eq!(restored.store.lock().messages(&aid, 100).unwrap().len(), 2);
+    assert_eq!(
+        restored.asset_bytes(&attachments[0].id).unwrap(),
+        cases[0].1
+    );
+}
+
+#[tokio::test]
+async fn file_limits_and_old_peer_compatibility() {
+    let ar = tempfile::tempdir().unwrap();
+    let br = tempfile::tempdir().unwrap();
+    let a = Core::create(ar.path().into(), 0, events()).unwrap();
+    let b = Core::create(br.path().into(), 0, events()).unwrap();
+    b.local.lock().file_transfer = false;
+    let _a_server = Running::start(a.clone(), false).await.unwrap();
+    let _server = Running::start(b.clone(), false).await.unwrap();
+    ready(&b).await;
+    pair(&a, &b).await;
+    let bid = b.local.lock().id.clone();
+    let aid = a.local.lock().id.clone();
+    let attachment = a.stage(b"plain text file", "readme.txt").unwrap();
+    let file = network::send(
+        a.clone(),
+        bid.clone(),
+        String::new(),
+        vec![attachment.id.clone()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(file.status, "failed");
+    assert!(file.delivery_error.unwrap().contains("0.2.0"));
+    assert!(b.store.lock().messages(&aid, 100).unwrap().is_empty());
+    let text = network::send(a.clone(), bid.clone(), "文字仍可发送".into(), vec![])
+        .await
+        .unwrap();
+    assert_eq!(text.status, "sent");
+    let image = a.stage(&png(), "image.png").unwrap();
+    assert_eq!(
+        network::send(a.clone(), bid, String::new(), vec![image.id])
+            .await
+            .unwrap()
+            .status,
+        "sent"
+    );
+    b.local.lock().file_transfer = true;
+    a.see(b.local.lock().clone(), "127.0.0.1".parse().unwrap())
+        .unwrap();
+    let bid = b.local.lock().id.clone();
+    assert_eq!(
+        network::retry(a.clone(), bid, file.id)
+            .await
+            .unwrap()
+            .status,
+        "sent"
+    );
+    let oversized = ar.path().join("large.bin");
+    std::fs::File::create(&oversized)
+        .unwrap()
+        .set_len(MAX_FILE as u64 + 1)
+        .unwrap();
+    assert!(a.stage_path(&oversized).unwrap_err().contains("100 MB"));
+    assert!(a.stage_path(ar.path()).is_err());
+    let mut invalid = attachment.clone();
+    invalid.name = "../../escaped.txt".into();
+    assert!(invalid.validate().is_err());
+    invalid = attachment;
+    invalid.size = MAX_FILE + 1;
+    assert!(invalid.validate().is_err());
+    let mut old_info = serde_json::to_value(b.local.lock().clone()).unwrap();
+    old_info.as_object_mut().unwrap().remove("file_transfer");
+    let decoded: Device = serde_json::from_value(old_info).unwrap();
+    assert!(!decoded.file_transfer);
+    decoded.validate().unwrap();
 }

@@ -108,7 +108,13 @@ async function desktop(page: Page) {
             id: crypto.randomUUID(),
             peer_id: args.peerId,
             text: args.text,
-            images: args.imageIds.map(() => asset),
+            images: args.imageIds.map((id: string) =>
+              [
+                asset,
+                ...(w.__mock.files || []),
+                ...(w.__mock.staged || []),
+              ].find((a: any) => a.id === id),
+            ),
             created_at: Date.now(),
             direction: "outgoing",
             status: w.__mock.failSend ? "failed" : "sent",
@@ -132,10 +138,27 @@ async function desktop(page: Page) {
           w.__mock.copied = args.text;
           return;
         }
-        if (cmd === "choose_images") return [asset];
-        if (cmd === "stage_image") {
-          if (args.bytes.length === 0) throw "图片为空";
-          return asset;
+        if (cmd === "choose_files") {
+          if (w.__mock.holdChoice)
+            await new Promise<void>((resolve) => {
+              w.__mock.finishChoice = resolve;
+            });
+          return w.__mock.files || [asset];
+        }
+        if (cmd === "stage_file") {
+          const staged =
+            args.name === "paste.png"
+              ? asset
+              : {
+                  ...asset,
+                  id: crypto.randomUUID(),
+                  name: args.name,
+                  mime: "application/octet-stream",
+                  size: args.bytes.length,
+                };
+          w.__mock.staged ||= [];
+          w.__mock.staged.push(staged);
+          return staged;
         }
         if (cmd === "image_url")
           return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
@@ -164,7 +187,7 @@ async function desktop(page: Page) {
           state.local.name = args.name;
           return;
         }
-        if (cmd === "save_image") return true;
+        if (cmd === "save_attachment") return true;
         return null;
       },
     };
@@ -187,7 +210,7 @@ test("Markdown chat, original copy, preview, image attachment and send shortcut"
   await page.getByRole("button", { name: "预览", exact: true }).click();
   await expect(page.locator("#preview h2")).toHaveText("来自 Mac");
   await page.getByRole("button", { name: "编辑", exact: true }).click();
-  await page.getByRole("button", { name: "添加图片", exact: true }).click();
+  await page.getByRole("button", { name: "添加文件", exact: true }).click();
   await expect(page.locator(".draft-image")).toHaveCount(1);
   await page.locator("#text").press("Shift+Enter");
   await expect(page.locator("#text")).toHaveValue(
@@ -290,7 +313,7 @@ test("remote images remain unloaded until clicked and pasted image bytes are sen
   expect(
     await page.evaluate(
       () =>
-        (window as any).__mock.calls.find((c: any) => c.cmd === "stage_image")
+        (window as any).__mock.calls.find((c: any) => c.cmd === "stage_file")
           .args.bytes,
     ),
   ).toEqual([137, 80, 78, 71]);
@@ -313,4 +336,114 @@ test("a repeated failed retry remains available and keeps its error", async ({
   await page.evaluate(() => ((window as any).__mock.failRetry = false));
   await retry.click();
   await expect(retry).toHaveCount(0);
+});
+
+test("arbitrary file cards, mixed images, file-only sending and saving", async ({
+  page,
+}) => {
+  await desktop(page);
+  await page.evaluate(() => {
+    (window as any).__mock.holdChoice = true;
+    (window as any).__mock.files = [
+      {
+        id: "pdf",
+        name: "合同.pdf",
+        mime: "application/octet-stream",
+        size: 2048,
+        hash: "hash",
+      },
+      {
+        id: "zip",
+        name: "资料.zip",
+        mime: "application/octet-stream",
+        size: 2 * 1024 * 1024,
+        hash: "hash",
+      },
+      {
+        id: "empty",
+        name: "empty.txt",
+        mime: "application/octet-stream",
+        size: 0,
+        hash: "hash",
+      },
+      {
+        id: "escaped",
+        name: "notes <b>.txt",
+        mime: "application/octet-stream",
+        size: 12,
+        hash: "hash",
+      },
+      {
+        id: "asset1",
+        name: "截图.png",
+        mime: "image/png",
+        size: 68,
+        hash: "hash",
+      },
+    ];
+  });
+  await page.getByRole("button", { name: "添加文件", exact: true }).click();
+  await expect(page.locator("#send")).toBeDisabled();
+  await page.getByRole("button", { name: /卧室电脑/ }).click();
+  await expect(page.getByRole("heading", { name: "Windows 11" })).toBeVisible();
+  await page.locator("#text").press("Enter");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.calls.filter(
+          (c: any) => c.cmd === "send_message",
+        ).length,
+    ),
+  ).toBe(0);
+  await page.evaluate(() => (window as any).__mock.finishChoice());
+  await expect(page.locator(".draft-file")).toHaveCount(4);
+  await expect(page.locator(".draft-image")).toHaveCount(1);
+  await page.locator("#text").press("Enter");
+  await expect(page.locator(".file-card")).toHaveCount(4);
+  await expect(
+    page.getByRole("button", { name: "保存文件 资料.zip", exact: true }),
+  ).toContainText("2.0 MB");
+  await expect(
+    page.getByRole("button", { name: "保存文件 empty.txt", exact: true }),
+  ).toContainText("0 B");
+  await expect(page.locator(".file-card b")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "保存文件 notes <b>.txt", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "保存文件 合同.pdf", exact: true })
+    .click();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.calls
+          .filter((c: any) => c.cmd === "save_attachment")
+          .at(-1).args.id,
+    ),
+  ).toBe("pdf");
+  await expect(page.locator("#toast")).toHaveText("文件已保存");
+});
+
+test("dragging an empty generic file stages and sends it without text", async ({
+  page,
+}) => {
+  await desktop(page);
+  await page.locator("#composer").evaluate((element) => {
+    const data = new DataTransfer();
+    data.items.add(
+      new File([], "empty.bin", { type: "application/octet-stream" }),
+    );
+    element.dispatchEvent(
+      new DragEvent("drop", {
+        dataTransfer: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(page.locator(".draft-file")).toContainText("empty.bin");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "保存文件 empty.bin", exact: true }),
+  ).toBeVisible();
 });

@@ -552,18 +552,18 @@ async fn receive(
             wire = Some(message);
         } else {
             valid_id(&name).map_err(bad)?;
-            if images.len() >= MAX_IMAGES || images.contains_key(&name) {
-                return Err(bad("图片附件数量无效"));
+            if images.len() >= MAX_ATTACHMENTS || images.contains_key(&name) {
+                return Err(bad("附件数量无效"));
             }
             let bytes = field.bytes().await.map_err(bad)?;
-            if bytes.len() > MAX_IMAGE {
-                return Err(bad("单张图片最多 15 MB"));
+            if bytes.len() > MAX_FILE {
+                return Err(bad("单个文件最多 100 MB"));
             }
             total += bytes.len();
             images.insert(name, bytes.to_vec());
         }
         if total > MAX_TRANSFER {
-            return Err(bad("一条消息最多 32 MB"));
+            return Err(bad("一条消息最多 200 MB"));
         }
     }
     c.receive(&peer, wire.ok_or_else(|| bad("缺少消息正文"))?, images)
@@ -643,15 +643,22 @@ pub async fn retry(c: Arc<Core>, peer_id: String, id: String) -> Result<Message,
 async fn transmit(c: &Arc<Core>, peer_id: &str, wire: &WireMessage) -> Result<(), String> {
     let _guard = c.sending.lock().await;
     let peer = c.trusted(peer_id)?;
+    if !peer.device.file_transfer
+        && (wire.images.iter().any(|a| !a.is_image())
+            || wire.text.len() + wire.images.iter().map(|a| a.size).sum::<usize>()
+                > 32 * 1024 * 1024)
+    {
+        return Err("请将对方 PCMessage 更新到 0.2.0 或更高版本后发送文件".into());
+    }
     let client = client(&peer.device, &peer.address)?;
     let mut form = reqwest::multipart::Form::new().text(
         "message",
         serde_json::to_string(wire).map_err(|e| e.to_string())?,
     );
     for image in &wire.images {
-        let bytes = c.image_bytes(&image.id)?;
+        let bytes = c.asset_bytes(&image.id)?;
         if fingerprint(&bytes) != image.hash {
-            return Err("本地图片损坏".into());
+            return Err("本地附件损坏".into());
         }
         let part = reqwest::multipart::Part::bytes(bytes)
             .file_name(image.name.clone())
@@ -665,6 +672,7 @@ async fn transmit(c: &Arc<Core>, peer_id: &str, wire: &WireMessage) -> Result<()
         .header("x-peer-id", local_id)
         .header("x-peer-token", &peer.token)
         .multipart(form)
+        .timeout(Duration::from_secs(300))
         .send()
         .await
         .map_err(|e| {

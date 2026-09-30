@@ -6,9 +6,10 @@ pub const DEFAULT_PORT: u16 = 47321;
 pub const DISCOVERY_PORT: u16 = 47322;
 pub const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 47, 32);
 pub const MAX_IMAGE: usize = 15 * 1024 * 1024;
-pub const MAX_TRANSFER: usize = 32 * 1024 * 1024;
+pub const MAX_FILE: usize = 100 * 1024 * 1024;
+pub const MAX_TRANSFER: usize = 200 * 1024 * 1024;
 pub const MAX_TEXT: usize = 256 * 1024;
-pub const MAX_IMAGES: usize = 8;
+pub const MAX_ATTACHMENTS: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
@@ -18,6 +19,8 @@ pub struct Device {
     pub certificate: String,
     pub version: u8,
     pub platform: String,
+    #[serde(default)]
+    pub file_transfer: bool,
 }
 impl Device {
     pub fn validate(&self) -> Result<(), String> {
@@ -61,11 +64,38 @@ pub struct Attachment {
     pub size: usize,
     pub hash: String,
 }
+impl Attachment {
+    pub fn is_image(&self) -> bool {
+        matches!(
+            self.mime.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        )
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        valid_id(&self.id)?;
+        if self.name.is_empty()
+            || self.name.chars().count() > 120
+            || self
+                .name
+                .chars()
+                .any(|c| c.is_control() || c == '/' || c == '\\')
+            || self.hash.len() != 64
+            || !self.hash.bytes().all(|b| b.is_ascii_hexdigit())
+            || self.size > MAX_FILE
+            || (self.is_image() && (self.size == 0 || self.size > MAX_IMAGE))
+            || (!self.is_image() && self.mime != "application/octet-stream")
+        {
+            return Err("附件信息无效".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: String,
     pub peer_id: String,
     pub text: String,
+    // Keep the v1 field name for existing history; includes images and ordinary files.
     pub images: Vec<Attachment>,
     pub created_at: i64,
     pub direction: String,
@@ -78,6 +108,7 @@ pub struct Message {
 pub struct WireMessage {
     pub id: String,
     pub text: String,
+    // Keep the v1 field name so text and image messages remain compatible with old peers.
     pub images: Vec<Attachment>,
     pub created_at: i64,
 }
@@ -85,30 +116,22 @@ impl WireMessage {
     pub fn validate(&self) -> Result<(), String> {
         valid_id(&self.id)?;
         if self.text.len() > MAX_TEXT
-            || self.images.len() > MAX_IMAGES
+            || self.images.len() > MAX_ATTACHMENTS
             || (self.text.trim().is_empty() && self.images.is_empty())
         {
             return Err("消息为空或超出大小限制".into());
         }
         let mut total = self.text.len();
         let mut ids = std::collections::HashSet::new();
-        for image in &self.images {
-            valid_id(&image.id)?;
-            if !ids.insert(&image.id)
-                || image.size > MAX_IMAGE
-                || image.size == 0
-                || image.name.chars().count() > 120
-                || image.hash.len() != 64
-                || !image.hash.bytes().all(|b| b.is_ascii_hexdigit())
-                || !["image/png", "image/jpeg", "image/gif", "image/webp"]
-                    .contains(&image.mime.as_str())
-            {
-                return Err("图片信息无效".into());
+        for attachment in &self.images {
+            attachment.validate()?;
+            if !ids.insert(&attachment.id) {
+                return Err("附件 ID 重复".into());
             }
-            total = total.checked_add(image.size).ok_or("图片过大")?;
+            total = total.checked_add(attachment.size).ok_or("附件过大")?;
         }
         if total > MAX_TRANSFER {
-            return Err("一条消息最多 32 MB".into());
+            return Err("一条消息最多 200 MB".into());
         }
         Ok(())
     }
@@ -134,9 +157,9 @@ pub struct Snapshot {
     pub network_error: Option<String>,
 }
 pub fn valid_id(id: &str) -> Result<(), String> {
-    let parsed = uuid::Uuid::parse_str(id).map_err(|_| "图片或消息 ID 无效")?;
+    let parsed = uuid::Uuid::parse_str(id).map_err(|_| "附件或消息 ID 无效")?;
     if parsed.to_string() != id {
-        return Err("图片或消息 ID 格式无效".into());
+        return Err("附件或消息 ID 格式无效".into());
     }
     Ok(())
 }

@@ -861,3 +861,60 @@ input {
 .message-tools {
   flex-wrap: wrap;
 }
+.message-files {
+  display: grid;
+  gap: 8px;
+}
+.file-card,
+.draft-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #dfe7d8;
+  border-radius: 10px;
+  background: #f8faf5;
+  color: #365341;
+  text-align: left;
+}
+.file-card {
+  width: 100%;
+  cursor: pointer;
+}
+.file-card:hover {
+  background: #edf3e7;
+}
+.file-card svg,
+.draft-file svg {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+.file-card > span:first-of-type,
+.draft-file > span {
+  flex: 1;
+  min-width: 0;
+}
+.file-card strong,
+.draft-file strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 500;
+}
+.file-card small,
+.draft-file small {
+  display: block;
+  margin-top: 4px;
+  color: #85917e;
+  font-size: 11px;
+}
+.file-save {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.draft-file {
+  max-width: 280px;
+  padding: 8px 10px;
+}

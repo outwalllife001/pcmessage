@@ -5,6 +5,7 @@ export interface Device {
   certificate: string;
   version: number;
   platform: string;
+  file_transfer?: boolean;
 }
 export interface Peer extends Device {
   address: string;

@@ -81,7 +81,7 @@ async fn retry_message(
     network::retry(core.inner().clone(), peer_id, id).await
 }
 #[tauri::command]
-async fn stage_image(
+async fn stage_file(
     core: State<'_, Arc<Core>>,
     bytes: Vec<u8>,
     name: String,
@@ -99,7 +99,7 @@ async fn image_url(core: State<'_, Arc<Core>>, id: String) -> Result<String, Str
         .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn choose_images(
+async fn choose_files(
     app: tauri::AppHandle,
     core: State<'_, Arc<Core>>,
 ) -> Result<Vec<Attachment>, String> {
@@ -108,27 +108,13 @@ async fn choose_images(
         let paths = app
             .dialog()
             .file()
-            .add_filter("图片", &["png", "jpg", "jpeg", "gif", "webp"])
             .blocking_pick_files()
             .unwrap_or_default();
-        if paths.len() > MAX_IMAGES {
-            return Err("每条消息最多 8 张图片".into());
-        }
-        paths
+        let paths = paths
             .into_iter()
-            .map(|p| {
-                let path = p.into_path().map_err(|e| e.to_string())?;
-                let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
-                if size > MAX_IMAGE as u64 {
-                    return Err("单张图片最多 15 MB".into());
-                }
-                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-                core.stage(
-                    &bytes,
-                    &path.file_name().unwrap_or_default().to_string_lossy(),
-                )
-            })
-            .collect()
+            .map(|p| p.into_path().map_err(|e| e.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        core.stage_paths(&paths)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -138,26 +124,10 @@ async fn stage_paths(
     core: State<'_, Arc<Core>>,
     paths: Vec<String>,
 ) -> Result<Vec<Attachment>, String> {
-    if paths.len() > MAX_IMAGES {
-        return Err("每条消息最多 8 张图片".into());
-    }
     let core = core.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        paths
-            .into_iter()
-            .map(|p| {
-                let path = std::path::PathBuf::from(p);
-                let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
-                if size > MAX_IMAGE as u64 {
-                    return Err("单张图片最多 15 MB".into());
-                }
-                let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-                core.stage(
-                    &bytes,
-                    &path.file_name().unwrap_or_default().to_string_lossy(),
-                )
-            })
-            .collect()
+        let paths: Vec<_> = paths.into_iter().map(std::path::PathBuf::from).collect();
+        core.stage_paths(&paths)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -191,7 +161,7 @@ async fn clipboard_image(core: State<'_, Arc<Core>>) -> Result<Option<Attachment
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn save_image(
+async fn save_attachment(
     app: tauri::AppHandle,
     core: State<'_, Arc<Core>>,
     id: String,
@@ -208,8 +178,7 @@ async fn save_image(
             return Ok(false);
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
-        let bytes = core.image_bytes(&id)?;
-        std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+        core.export_attachment(&id, &path)?;
         Ok(true)
     })
     .await
@@ -239,12 +208,12 @@ pub fn run() {
             forget_peer,
             send_message,
             retry_message,
-            stage_image,
+            stage_file,
             image_url,
-            choose_images,
+            choose_files,
             stage_paths,
             clipboard_image,
-            save_image
+            save_attachment
         ])
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem};

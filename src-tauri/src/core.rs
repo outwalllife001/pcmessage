@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
-    io::Cursor,
+    io::{Cursor, Read},
     net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::Arc,
@@ -67,6 +67,7 @@ impl Core {
             certificate,
             version: 1,
             platform: std::env::consts::OS.into(),
+            file_transfer: true,
         };
         Ok(Arc::new(Self {
             local: Mutex::new(local),
@@ -186,6 +187,7 @@ impl Core {
             trusted.address = s.address.clone();
             trusted.device.port = s.device.port;
             trusted.device.name = s.device.name.clone();
+            trusted.device.file_transfer = s.device.file_transfer;
         }
         Ok(trusted)
     }
@@ -207,7 +209,10 @@ impl Core {
         Ok(())
     }
     pub fn stage(&self, bytes: &[u8], name: &str) -> Result<Attachment, String> {
-        let mime = validate_image(bytes)?;
+        if bytes.len() > MAX_FILE {
+            return Err("单个文件最多 100 MB".into());
+        }
+        let mime = validate_image(bytes).unwrap_or_else(|_| "application/octet-stream".into());
         let attachment = Attachment {
             id: uuid::Uuid::new_v4().to_string(),
             name: safe_name(name),
@@ -215,22 +220,69 @@ impl Core {
             size: bytes.len(),
             hash: fingerprint(bytes),
         };
-        self.save_image(&attachment, bytes)?;
+        self.save_attachment(&attachment, bytes)?;
         Ok(attachment)
     }
-    pub fn save_image(&self, attachment: &Attachment, bytes: &[u8]) -> Result<(), String> {
-        valid_id(&attachment.id)?;
+    pub fn stage_path(&self, path: &Path) -> Result<Attachment, String> {
+        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("请选择文件；文件夹请先压缩".into());
+        }
+        if metadata.len() > MAX_FILE as u64 {
+            return Err("单个文件最多 100 MB".into());
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .map_err(|e| e.to_string())?
+            .take(MAX_FILE as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        self.stage(
+            &bytes,
+            &path.file_name().unwrap_or_default().to_string_lossy(),
+        )
+    }
+    pub fn stage_paths(&self, paths: &[PathBuf]) -> Result<Vec<Attachment>, String> {
+        if paths.len() > MAX_ATTACHMENTS {
+            return Err("每条消息最多 8 个附件".into());
+        }
+        let mut total = 0;
+        for path in paths {
+            let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+            if !metadata.is_file() {
+                return Err("请选择文件；文件夹请先压缩".into());
+            }
+            if metadata.len() > MAX_FILE as u64 {
+                return Err("单个文件最多 100 MB".into());
+            }
+            total += metadata.len();
+            if total > MAX_TRANSFER as u64 {
+                return Err("一条消息最多 200 MB".into());
+            }
+        }
+        paths.iter().map(|path| self.stage_path(path)).collect()
+    }
+    pub fn export_attachment(&self, id: &str, destination: &Path) -> Result<(), String> {
+        let attachment = self.attachment(id)?;
+        let bytes = self.asset_bytes(id)?;
+        if bytes.len() != attachment.size || fingerprint(&bytes) != attachment.hash {
+            return Err("本地附件损坏".into());
+        }
+        std::fs::write(destination, bytes).map_err(|e| e.to_string())
+    }
+    pub fn save_attachment(&self, attachment: &Attachment, bytes: &[u8]) -> Result<(), String> {
+        attachment.validate()?;
         if bytes.len() != attachment.size
             || fingerprint(bytes) != attachment.hash
-            || validate_image(bytes)? != attachment.mime
+            || (attachment.is_image() && validate_image(bytes)? != attachment.mime)
         {
-            return Err("图片校验失败".into());
+            return Err("附件校验失败".into());
         }
         let path = self.root.join("assets").join(&attachment.id);
         if path.exists()
             && fingerprint(&std::fs::read(&path).map_err(|e| e.to_string())?) != attachment.hash
         {
-            return Err("图片 ID 冲突".into());
+            return Err("附件 ID 冲突".into());
         }
         atomic_write(&path, bytes)?;
         atomic_write(
@@ -245,16 +297,19 @@ impl Core {
         serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())
     }
-    pub fn image_bytes(&self, id: &str) -> Result<Vec<u8>, String> {
+    pub fn asset_bytes(&self, id: &str) -> Result<Vec<u8>, String> {
         valid_id(id)?;
         std::fs::read(self.root.join("assets").join(id)).map_err(|e| e.to_string())
     }
     pub fn image_url(&self, id: &str) -> Result<String, String> {
         let a = self.attachment(id)?;
+        if !a.is_image() {
+            return Err("此文件不支持图片预览".into());
+        }
         Ok(format!(
             "data:{};base64,{}",
             a.mime,
-            STANDARD.encode(self.image_bytes(id)?)
+            STANDARD.encode(self.asset_bytes(id)?)
         ))
     }
     pub async fn receive(
@@ -265,7 +320,7 @@ impl Core {
     ) -> Result<bool, String> {
         wire.validate()?;
         if images.len() != wire.images.len() {
-            return Err("图片附件不完整".into());
+            return Err("附件不完整".into());
         }
         // Serialise duplicate detection, attachment writes and durable insertion.
         let _guard = self.receiving.lock().await;
@@ -274,7 +329,7 @@ impl Core {
             return Ok(false);
         }
         for a in &wire.images {
-            self.save_image(a, images.get(&a.id).ok_or("图片附件不完整")?)?;
+            self.save_attachment(a, images.get(&a.id).ok_or("附件不完整")?)?;
         }
         let message = Message {
             id: wire.id,
@@ -351,10 +406,10 @@ pub fn private_permissions(path: &Path) -> Result<(), String> {
     Ok(())
 }
 fn safe_name(name: &str) -> String {
-    let name = name.rsplit(['/', '\\']).next().unwrap_or("图片");
+    let name = name.rsplit(['/', '\\']).next().unwrap_or("文件");
     let s: String = name.chars().filter(|c| !c.is_control()).take(120).collect();
     if s.is_empty() {
-        "图片".into()
+        "文件".into()
     } else {
         s
     }
