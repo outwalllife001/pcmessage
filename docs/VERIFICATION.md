@@ -70,7 +70,7 @@
 - `npm run build:mac` 新增固定证书选择、签名校验及普通拖放安装 DMG 打包；无有效证书或指定临时签名 `-` 时停止，避免再次交付临时签名包。证书和私钥没有写入仓库。
 - 0.2.1 ARM64 构建成功，`.app` 的 designated requirement 与已验证的签名 0.2.0 完全一致，`codesign --verify --strict` 及 DMG 校验通过。开发证书供本机使用，尚未进行 Developer ID 发行签名或公证。
 - 前端构建、4 项 Markdown 测试及 6 项真实 HTTPS / SQLite 集成测试通过；无效签名身份的构建拒绝验证通过。
-- DMG 挂载后再次通过 `codesign --verify --strict`。0.2.1 已打包；实机的签名修复应用在 0.2.0 上并已验证发送，随后 Mac 锁屏，0.2.1 的正式替换及再次重启验证尚待解锁。
+- DMG 挂载后再次通过 `codesign --verify --strict`。0.2.1 已打包；实机的签名修复应用在 0.2.0 上并已验证发送，随后因 Mac 锁屏没有执行 0.2.1 的正式替换。后续在 0.2.2 已完成更新和重启验证。
 
 ## 0.2.2 移除设备
 
@@ -79,3 +79,4 @@
 - 沿用 settings 表保存隐藏状态，不新增数据库表或依赖。
 - 前端构建、4 项 Markdown 测试、8 项界面测试、7 项真实 HTTPS / SQLite 集成测试、Clippy 和格式检查通过。新增测试覆盖取消、离线与未配对设备移除、最后一项移除后的空白状态、重启保持隐藏、旧凭证拒绝、历史及附件保留，以及重新添加配对后的发送。
 - Mac ARM64 0.2.2 已签名打包并更新 `/Applications/PCMessage.app`。原生客户端实际移除旧的离线 Windows 配对，列表只保留当前在线的 Windows；退出重启后仍只有一项，当前设备保持在线。只读核对旧设备的 11 条历史仍在数据库中。
+- Windows 11 通过 SSH 同步源码提交 `1ee56b4` 后，本机构建、4 项 Markdown 测试及 7 项真实 HTTPS / SQLite 集成测试通过，生成 `PCMessage_0.2.2_x64-setup.exe`（3,753,516 字节）。安装包已复制到 Mac 的 artifacts，双端 SHA-256 一致：`fe9615d82acd1f8e00e5f20cae97f14fc40d48397cdb7cf9ef429541c6006e54`。本轮没有替换正在运行的 Windows 应用，安装包供升级使用；Windows 原生移除按钮尚未进行实机操作验证。
