@@ -21,7 +21,18 @@ fn get_messages(
     core.store.lock().messages(&peer_id, limit.clamp(1, 1000))
 }
 #[tauri::command]
-fn mark_read(core: State<'_, Arc<Core>>, peer_id: String) -> Result<(), String> {
+fn mark_read(
+    app: tauri::AppHandle,
+    core: State<'_, Arc<Core>>,
+    peer_id: String,
+) -> Result<(), String> {
+    let viewing = app
+        .get_webview_window("main")
+        .map(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false))
+        .unwrap_or(false);
+    if !viewing {
+        return Ok(());
+    }
     let store = core.store.lock();
     if store.unread(&peer_id) > 0 {
         store.mark_read(&peer_id)?;
@@ -305,7 +316,16 @@ pub fn run() {
                 let _ = window.hide();
             }
         });
-    builder
-        .run(tauri::generate_context!())
+    let app = builder
+        .build(tauri::generate_context!())
         .expect("PCMessage 启动失败");
+    app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = _event {
+            if let Some(window) = _app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    });
 }

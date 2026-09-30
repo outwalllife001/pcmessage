@@ -1,6 +1,6 @@
 # PCMessage 实现说明
 
-目标已收窄为 Apple Silicon Mac（M4 Pro，macOS 15+）和 Windows 11 x64。主用途是文字消息，Markdown 只是排版方式。第一版已实现桌面客户端，安装包由本地 Mac 构建和 GitHub Actions 两平台构建生成。
+目标已收窄为 Apple Silicon Mac（M4 Pro，macOS 15+）和 Windows 11 x64。主用途是文字消息，Markdown 只是排版方式。第一版已实现桌面客户端，Mac 安装包本地生成，Windows 已配置 GitHub Actions 构建；本次按用户要求先交付 Mac 与源码。
 
 ## 已实现
 

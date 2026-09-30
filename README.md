@@ -28,6 +28,8 @@
 
 下载的 ZIP 先解压。测试安装包未购买代码签名证书；如果系统拦截，请从系统设置允许打开你自己构建/本仓库下载的应用。
 
+本次先交付 Mac 安装包与源码。Windows 构建被 GitHub 账户账单锁定阻止，尚无 Windows 安装包，详见[验证记录](docs/VERIFICATION.md)。
+
 ## 开发
 
 需要 Node.js 22+、Rust stable；Mac 需要 Xcode Command Line Tools，Windows 需要 Visual Studio C++ Build Tools。
