@@ -189,7 +189,36 @@ test("Markdown chat, original copy, preview, image attachment and send shortcut"
   await page.getByRole("button", { name: "编辑", exact: true }).click();
   await page.getByRole("button", { name: "添加图片", exact: true }).click();
   await expect(page.locator(".draft-image")).toHaveCount(1);
-  await page.locator("#text").press("Control+Enter");
+  await page.locator("#text").press("Shift+Enter");
+  await expect(page.locator("#text")).toHaveValue(
+    "## 来自 Mac\n\n**你好 Windows**\n",
+  );
+  await page.locator("#text").evaluate((input) => {
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+      }),
+    );
+    // WebKit can report the IME confirmation key without isComposing.
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        keyCode: 229,
+        bubbles: true,
+      }),
+    );
+  });
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.calls.filter(
+          (c: any) => c.cmd === "send_message",
+        ).length,
+    ),
+  ).toBe(0);
+  await page.locator("#text").press("Enter");
   await expect(page.locator(".outgoing .markdown h2")).toHaveText("来自 Mac");
   await expect(page.getByRole("textbox", { name: "消息内容" })).toHaveValue("");
   await expect(page.locator(".message-images img")).toHaveCount(1);

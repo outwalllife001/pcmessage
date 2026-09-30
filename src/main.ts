@@ -69,8 +69,7 @@ let refreshAgain = false;
 let lightboxId = "";
 const imageCache = new Map<string, Promise<string>>();
 const drafts = new Map<string, Draft>();
-const apple = /Mac/.test(navigator.platform);
-$("shortcut").textContent = apple ? "⌘ Enter" : "Ctrl Enter";
+$("shortcut").textContent = "Enter 发送 · Shift + Enter 换行";
 function toast(message: unknown) {
   $("toast").textContent = String(message);
   $("toast").hidden = false;
@@ -464,9 +463,10 @@ input.oninput = () => {
 };
 input.onkeydown = (event) => {
   if (
-    (event.metaKey || event.ctrlKey) &&
     event.key === "Enter" &&
-    !event.isComposing
+    !event.shiftKey &&
+    !event.isComposing &&
+    event.keyCode !== 229
   ) {
     event.preventDefault();
     void send();

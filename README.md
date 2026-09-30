@@ -13,7 +13,7 @@
 1. Mac 打开 `.dmg`，把 PCMessage 拖到“应用程序”；Windows 运行 `-setup.exe`。
 2. 两边打开应用，在左侧选择另一台电脑。没有自动发现时，点“添加电脑”，填写对方“设置”中的 `IP:端口`。
 3. 在一台电脑上发起配对。两边核对同一个六位号码，并各自确认。
-4. 输入文字，使用 `⌘ Enter` / `Ctrl Enter` 或“发送”。Enter 换行。
+4. 输入文字，按 Enter 或点击“发送”。Shift + Enter 换行。
 
 图片可以选择、拖入或粘贴截图；收到后点击放大，也能另存。文字消息可以复制 Markdown 原文，代码块可以单独复制。关闭窗口会留在菜单栏/托盘继续接收；要完全退出，使用托盘菜单的“退出”。
 
@@ -62,7 +62,7 @@ Windows 构建（在 Windows 上执行）：
 npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
 
-安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.1.1_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.1.2_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
 
 ## 第一版边界
 
