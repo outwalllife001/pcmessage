@@ -68,7 +68,7 @@ Windows 构建（在 Windows 上执行）：
 npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
 
-安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.2.2_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/PCMessage_0.2.3_x64-setup.exe`。默认仅为当前用户安装，无需管理员权限。安装后可从开始菜单打开 PCMessage。
 
 ## 功能范围
 
@@ -80,6 +80,8 @@ npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locke
 - HTTPS 传输，首次核对配对码，之后固定信任设备证书。配对码比较时，两台电脑都应由你操作。消息数据库没有做额外的静态加密。
 
 ## 网络与数据
+
+若发送返回 `401 Unauthorized`，对方已经收到请求，但配对凭证被拒绝。选中该电脑，点击会话右上角“重新配对”，在两台电脑核对相同的六位号码并分别确认，然后点击失败消息的“重试”。重新配对保留聊天记录、草稿和附件，无需先移除设备。
 
 默认 TCP `47321` 接收消息，UDP `47322` 发现设备，组播地址 `239.255.47.32`。若 TCP 端口被占用，自动选择空闲端口，实际地址可在“设置”中查看。
 

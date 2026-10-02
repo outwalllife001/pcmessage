@@ -706,6 +706,9 @@ async fn transmit(c: &Arc<Core>, peer_id: &str, wire: &WireMessage) -> Result<()
             }
             format!("无法连接 {}:{}：{details}", peer.address, peer.device.port)
         })?;
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err("发送失败：401 Unauthorized。配对凭证已失效，请点击右上角“重新配对”，在两台电脑核对并确认号码后重试；聊天记录和失败消息会保留。".into());
+    }
     if !response.status().is_success() {
         return Err(format!("发送失败：{}", response.status()));
     }

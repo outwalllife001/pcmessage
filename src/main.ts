@@ -159,7 +159,7 @@ function renderHeader() {
   const p = peer();
   if (!p) return;
   $("conversation-header").innerHTML =
-    `<div class="header-peer"><span class="header-avatar">${icons.computer}</span><div><h1>${e(p.name)}</h1><span class="subtle">${p.online ? "在线" : "离线"} · ${e(p.address)}</span></div></div><button class="text-button" id="forget">移除设备</button>`;
+    `<div class="header-peer"><span class="header-avatar">${icons.computer}</span><div><h1>${e(p.name)}</h1><span class="subtle">${p.online ? "在线" : "离线"} · ${e(p.address)}</span></div></div><div class="header-actions">${p.paired ? '<button class="text-button" id="repair-pair">重新配对</button>' : ""}<button class="text-button" id="forget">移除设备</button></div>`;
   $("composer").hidden = !p.paired;
   $("pair-bar").hidden = p.paired;
   if (!p.paired)
@@ -180,6 +180,10 @@ function updateSend() {
   input.readOnly = sending || staging;
   const remove = document.getElementById("forget") as HTMLButtonElement | null;
   if (remove) remove.disabled = sending || staging;
+  const repair = document.getElementById(
+    "repair-pair",
+  ) as HTMLButtonElement | null;
+  if (repair) repair.disabled = sending || staging;
 }
 function isImage(attachment: Attachment): boolean {
   return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
@@ -463,6 +467,13 @@ $("peers").onclick = (event) => {
   if (button) void selectPeer(button.dataset.peer!);
 };
 $("conversation-header").onclick = (event) => {
+  const repair = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    "#repair-pair",
+  );
+  if (repair && selected && !sending && !staging) {
+    startPair(repair);
+    return;
+  }
   if (
     (event.target as HTMLElement).closest("#forget") &&
     selected &&
@@ -489,7 +500,10 @@ $("pair-bar").onclick = (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
     "#begin-pair",
   );
-  if (button && selected)
+  if (button && selected) startPair(button);
+};
+function startPair(button: HTMLButtonElement) {
+  if (selected)
     void action(async () => {
       button.disabled = true;
       try {
@@ -499,7 +513,7 @@ $("pair-bar").onclick = (event) => {
         button.disabled = false;
       }
     });
-};
+}
 $("pair-content").onclick = (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>(
     "[data-confirm],[data-decline]",

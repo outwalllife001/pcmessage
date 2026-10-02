@@ -10,6 +10,75 @@ fn events() -> Events {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stale_credentials_can_be_repaired_without_losing_history_or_failed_messages() {
+    let ar = tempfile::tempdir().unwrap();
+    let br = tempfile::tempdir().unwrap();
+    let a = Core::create(ar.path().into(), 0, events()).unwrap();
+    let b = Core::create(br.path().into(), 0, events()).unwrap();
+    let _a_server = Running::start(a.clone(), false).await.unwrap();
+    let _b_server = Running::start(b.clone(), false).await.unwrap();
+    ready(&a).await;
+    ready(&b).await;
+    pair(&a, &b).await;
+    let aid = a.local.lock().id.clone();
+    let bid = b.local.lock().id.clone();
+    let initial = network::send(a.clone(), bid.clone(), "原有历史".into(), vec![])
+        .await
+        .unwrap();
+    assert_eq!(initial.status, "sent");
+    let mut stale = b.trusted(&aid).unwrap();
+    stale.token = "0".repeat(64);
+    b.store.lock().trust(&stale).unwrap();
+    let failed_a = network::send(a.clone(), bid.clone(), "等待恢复 A".into(), vec![])
+        .await
+        .unwrap();
+    let failed_b = network::send(b.clone(), aid.clone(), "等待恢复 B".into(), vec![])
+        .await
+        .unwrap();
+    for message in [&failed_a, &failed_b] {
+        assert_eq!(message.status, "failed");
+        assert!(message
+            .delivery_error
+            .as_deref()
+            .unwrap()
+            .contains("重新配对"));
+    }
+    let request = network::begin_pair(a.clone(), &bid).await.unwrap();
+    assert_eq!(
+        a.snapshot().unwrap().pairings[0].code,
+        b.snapshot().unwrap().pairings[0].code
+    );
+    network::confirm_pair(&a, &request, true).unwrap();
+    network::confirm_pair(&b, &request, true).unwrap();
+    for _ in 0..100 {
+        if a.trusted(&bid).unwrap().token == b.trusted(&aid).unwrap().token {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    assert_eq!(
+        a.trusted(&bid).unwrap().token,
+        b.trusted(&aid).unwrap().token
+    );
+    for (sender, peer_id, failed) in [
+        (a.clone(), bid.clone(), failed_a),
+        (b.clone(), aid.clone(), failed_b),
+    ] {
+        let retried = network::retry(sender, peer_id, failed.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(retried.status, "sent");
+        assert_eq!(retried.id, failed.id);
+        assert!(retried.delivery_error.is_none());
+    }
+    for (core, peer_id) in [(&a, &bid), (&b, &aid)] {
+        let messages = core.store.lock().messages(peer_id, 100).unwrap();
+        assert_eq!(messages.len(), 3);
+        assert!(messages.iter().any(|m| m.id == initial.id));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn removed_devices_stay_hidden_revoke_access_and_keep_history_for_repairing() {
     let ar = tempfile::tempdir().unwrap();
     let br = tempfile::tempdir().unwrap();

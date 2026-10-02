@@ -119,7 +119,7 @@ async function desktop(page: Page) {
             direction: "outgoing",
             status: w.__mock.failSend ? "failed" : "sent",
             delivery_error: w.__mock.failSend
-              ? "无法连接 192.168.1.20:47321：连接超时"
+              ? w.__mock.sendError || "无法连接 192.168.1.20:47321：连接超时"
               : null,
             unread: false,
           };
@@ -378,6 +378,51 @@ test("a repeated failed retry remains available and keeps its error", async ({
   await page.evaluate(() => ((window as any).__mock.failRetry = false));
   await retry.click();
   await expect(retry).toHaveCount(0);
+});
+
+test("an existing pairing can be repaired while preserving failed messages and drafts", async ({
+  page,
+}) => {
+  await desktop(page);
+  await page.evaluate(() => {
+    (window as any).__mock.failSend = true;
+    (window as any).__mock.sendError =
+      "发送失败：401 Unauthorized。配对凭证已失效，请重新配对";
+  });
+  await page.locator("#text").fill("凭证失效后保留的消息");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.locator(".delivery-error")).toContainText("重新配对");
+  await page.locator("#text").fill("尚未发送的草稿");
+  await page.getByRole("button", { name: "重新配对", exact: true }).click();
+  await expect(page.getByText("123 456")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.calls.filter((c: any) => c.cmd === "forget_peer")
+          .length,
+    ),
+  ).toBe(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.calls.find((c: any) => c.cmd === "start_pair")
+          .args.peerId,
+    ),
+  ).toBe("windows");
+  await page.getByRole("button", { name: "号码相同，确认" }).click();
+  await expect(page.locator("#text")).toHaveValue("尚未发送的草稿");
+  await page.getByRole("button", { name: "发送失败 · 重试" }).click();
+  await expect(
+    page.getByRole("button", { name: "发送失败 · 重试" }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__mock.history.filter(
+          (m: any) => m.text === "凭证失效后保留的消息",
+        ).length,
+    ),
+  ).toBe(1);
 });
 
 test("arbitrary file cards, mixed images, file-only sending and saving", async ({
